@@ -15,7 +15,10 @@ def load_config() -> dict:
     """读取配置。config.yaml 不存在时回退到 config.example.yaml。"""
     path = CONFIG_PATH if os.path.isfile(CONFIG_PATH) else EXAMPLE_PATH
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        cfg = yaml.safe_load(f) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError(f"配置文件顶层必须是字典: {path}")
+    return cfg
 
 
 def save_config(cfg: dict) -> None:

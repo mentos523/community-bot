@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -198,6 +199,10 @@ def plugin_add():
         valid_plugins = {m["_name"] for m in manifests}
         if not name:
             flash("社区名称不能为空")
+        elif not re.match(r"^[\w\-. ]+$", name):
+            flash("社区名称只能包含字母、数字、下划线、横线、点和空格")
+        elif name.strip().lower() == "add":
+            flash("社区名称不能是保留字: add")
         elif plugin not in valid_plugins:
             flash(f"未知的插件: {plugin}")
         else:
@@ -602,8 +607,10 @@ def main():
     # R2-M8：port 非法时用默认 52323 并告警，不再直接崩溃
     try:
         port = int(web.get("port", 52323))
-    except (ValueError, TypeError):
-        print("错误: web.port 配置非法，已使用默认端口 52323")
+        if not 1 <= port <= 65535:
+            raise ValueError(f"端口越界: {port}")
+    except (ValueError, TypeError) as e:
+        print(f"错误: web.port 配置非法（{e}），已使用默认端口 52323")
         port = 52323
     if not os.environ.get("WEB_PASSWORD"):
         print("警告: 未设置 WEB_PASSWORD 环境变量，Web 登录已锁定（所有页面需登录）")

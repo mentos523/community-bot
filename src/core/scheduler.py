@@ -92,7 +92,12 @@ class Scheduler:
                 tmp = self.state_path + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(self.state, f, ensure_ascii=False, indent=2)
-                # U10：state.json 含 token/水位，新建时设 600 权限；已存在文件保持原权限
+                # U10+N3：含 token/水位，临时文件建好立刻设 600，缩小权限窗口
+                try:
+                    os.chmod(tmp, 0o600)
+                except OSError:
+                    pass
+                # U10：已存在文件保持原权限（只对新建文件确保 600）
                 is_new = not os.path.exists(self.state_path)
                 os.replace(tmp, self.state_path)
                 if is_new:
@@ -403,7 +408,7 @@ class Scheduler:
         prompts_cfg = self.config.get("prompts") or {}
         text, reason = generate_reply(
             self.mm, model_name, content,
-            bot_name=comm.get("bot_name"),  # U15：None 时由 generator 按优先级回退
+            bot_name=(comm.get("bot_name") or "").strip() or None,  # U15+N4：三级回退，纯空格视为未设置
             max_length=style.get("max_length", 0),
             options=self.mm.get_options(model_name),
             logger=self.log,
@@ -416,7 +421,7 @@ class Scheduler:
                 self.log.warning(f"[{name}] 主模型 {model_name} 失败，尝试备用模型 {fb}")
                 text, reason = generate_reply(
                     self.mm, fb, content,
-                    bot_name=comm.get("bot_name"),  # U15：None 时由 generator 按优先级回退
+                    bot_name=(comm.get("bot_name") or "").strip() or None,  # U15+N4：三级回退，纯空格视为未设置
                     max_length=style.get("max_length", 0),
                     options=self.mm.get_options(fb),
                     logger=self.log,

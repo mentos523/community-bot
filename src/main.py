@@ -52,7 +52,10 @@ def setup_logging() -> logging.Logger:
 
 def load_config(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        cfg = yaml.safe_load(f) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError(f"配置文件顶层必须是字典，实际是 {type(cfg).__name__}: {path}")
+    return cfg
 
 
 def resolve_community_config(comm: dict, manifests: dict) -> dict:
