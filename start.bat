@@ -47,10 +47,10 @@ if not exist "config\config.yaml" (
 )
 
 REM 4. 管理密码
-if "%WEB_PASSWORD%"=="" (
+if not defined WEB_PASSWORD (
     echo.
     set /p WEB_PASSWORD=请设置 Web 管理密码（登录 http://127.0.0.1:52323 用）:
-    if "%WEB_PASSWORD%"=="" (
+    if not defined WEB_PASSWORD (
         echo [失败] 密码不能为空
         pause
         exit /b 1

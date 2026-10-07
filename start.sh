@@ -18,8 +18,20 @@ echo "[OK] Python: $(python3 --version)"
 # 2. 安装依赖
 echo ""
 echo "正在安装依赖（pip install -r requirements.txt）..."
-python3 -m pip install -r requirements.txt -q || {
-    echo "[失败] 依赖安装失败，请检查网络后重试"
+pip_out=$(python3 -m pip install -r requirements.txt 2>&1) || {
+    if echo "$pip_out" | grep -q "externally-managed-environment"; then
+        echo ""
+        echo "[提示] 系统 Python 禁止直接 pip 安装（PEP 668，Ubuntu/Debian 常见）"
+        echo "  解决办法（二选一）："
+        echo "  ① 用虚拟环境（推荐）："
+        echo "     python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+        echo "  ② 加参数强制安装：python3 -m pip install --break-system-packages -r requirements.txt"
+        echo ""
+        echo "选好后重新运行本脚本"
+    else
+        echo "[失败] 依赖安装失败，请检查网络后重试"
+        echo "$pip_out" | tail -5
+    fi
     exit 1
 }
 echo "[OK] 依赖已安装"
@@ -57,7 +69,16 @@ echo ""
 # 守护进程放后台，日志写到 logs/daemon.log
 mkdir -p logs data
 nohup python3 -m src.main > logs/daemon.log 2>&1 &
-echo $! > data/daemon.pid
+daemon_pid=$!
+echo $daemon_pid > data/daemon.pid
+# M4：等 2 秒确认进程还活着（配置错误会秒退）
+sleep 2
+if ! kill -0 $daemon_pid 2>/dev/null; then
+    echo "[失败] 守护进程启动后立即退出，可能是配置有问题"
+    echo "  日志尾部（logs/daemon.log）："
+    tail -10 logs/daemon.log | sed 's/^/  /'
+    exit 1
+fi
 echo "[OK] 守护进程已启动（日志：logs/daemon.log）"
 
 # Web 放前台，Ctrl+C 能一起停掉

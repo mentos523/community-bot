@@ -69,6 +69,20 @@ def load_config(path: str) -> dict:
         )
     if not isinstance(cfg, dict):
         raise ValueError(f"配置文件顶层必须是字典，实际是 {type(cfg).__name__}: {path}")
+    # M2：已知字典段的类型校验（如 port:52323 会静默解析成字符串）
+    for section in ("communities", "rules", "tiers", "prompts", "web", "models"):
+        v = cfg.get(section)
+        if v is None:
+            continue
+        expect_list = section in ("communities", "models")
+        ok = isinstance(v, list) if expect_list else isinstance(v, dict)
+        if not ok:
+            raise ValueError(
+                f"配置文件 {section}: 应该是一个"
+                f"{'列表' if expect_list else '字典'}，实际是 {type(v).__name__}\n"
+                f"  可能原因：冒号后面漏了空格（如 port:52323 应写成 port: 52323）\n"
+                f"  或缩进不对。请检查该段的写法。"
+            )
     return cfg
 
 

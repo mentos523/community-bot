@@ -37,7 +37,7 @@ config_schema:
 
 ### 1. Web 界面（推荐）
 
-打开 `http://localhost:52323` → 插件管理：
+打开 `http://localhost:52323` → 社区管理：
 - 页面列出 `config.yaml` 里已配置的社区，可启用/禁用、点"配置"修改
 - 点"新增社区"可添加新社区：选插件（下拉，来自自动扫描 `plugins/` 的结果）→ 填社区名称 → 按该插件 `manifest.yaml` 的 `config_schema` 生成表单填写
 - 表单由 `config_schema` 自动生成，`secret: true` 的字段用密码框（留空表示保留原值）
