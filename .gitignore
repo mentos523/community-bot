@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 配置（真实配置不进仓库）
+config/config.yaml
+*.env
+
+# 日志
+logs/
+*.log
+
+# 系统
+.DS_Store
+.idea/
+.vscode/

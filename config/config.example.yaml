@@ -1,0 +1,38 @@
+# 社区机器人配置文件示例
+# 复制为 config.yaml 后修改
+# 密钥类请用环境变量提供，不要写明文
+
+communities:
+  - name: "示例社区"
+    platform: flarum          # flarum | discourse | telegram | discord
+    url: "https://example.com"
+    # 平台认证信息通过环境变量提供，如 FLARUM_TOKEN
+
+models:
+  - name: "qwen2.5:7b"
+    type: local               # local | remote | openai | gemini | anthropic
+    endpoint: "http://localhost:11434"
+    # 本地模型：web 界面可自动扫描
+  - name: "gpt-4o-mini"
+    type: openai
+    # api_key: 环境变量 OPENAI_API_KEY
+
+  # 默认模型
+default_model: "qwen2.5:7b"
+
+rules:
+  # 回复规则
+  min_question_length: 5      # 问题最短长度
+  max_replies_per_discussion_per_day: 2
+  max_replies_per_day: 20
+
+  # 梯度轮询间隔（秒）
+  tier_intervals:
+    hot: 60                   # 1小时内有活动
+    warm: 1800                # 1-24小时：30分钟
+    cold: 604800              # 24小时-3天：每周
+    # archived: 不检查
+
+web:
+  host: "0.0.0.0"
+  port: 8080
