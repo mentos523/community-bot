@@ -17,7 +17,7 @@
 # =====================================================================
 communities:
   # ---- 示例 1：Flarum 论坛 ----
-  - name: "学习交流"            # 自定义名称，日志和 Web 界面里显示用
+  - name: "技术交流"            # 自定义名称，日志和 Web 界面里显示用
     plugin: flarum             # 插件名 = plugins/ 下的目录名（flarum/discourse/telegram……）
     enabled: true              # false 则跳过该社区
     model: "qwen2.5:7b"        # 本社区用的模型（不填则用下面的 default_model）
@@ -30,8 +30,8 @@ communities:
     #   username / password: 走环境变量 FLARUM_USERNAME / FLARUM_PASSWORD
     #     守护进程 401/403 时会用账号密码 POST /api/token 全新登录换 token，
     #     换到的新 token 只保存在内存 + data/state.json（600 权限），不回写本文件
-    # username: "Ai-EDU"
-    tag_filter: "communicate"  # 只处理该标签下的讨论，留空则全板块
+    # username: "bot"
+    tag_filter: "tech"  # 只处理该标签下的讨论，留空则全板块
 
   # ---- 示例 2：Telegram 群（默认禁用，启用时去掉注释）----
   # - name: "技术交流群"
@@ -139,7 +139,7 @@ rules:
   skip_keywords: ["测试", "test", "签到"]  # 内容含这些词的不回
 
   # --- 特定用户：名单里的用户每次都回，不受上面门槛限制 ---
-  always_reply_users: ["robbin"]
+  always_reply_users: ["your_username"]  # 改成你的用户名
 
   # --- 频率控制（防刷屏、防烧 token）---
   max_replies_per_discussion_per_day: 2  # 同一讨论每天最多回 2 次

@@ -50,12 +50,12 @@ config_schema:
 
 ```yaml
 communities:
-  - name: "学习交流"      # 社区名称（Web 界面按此管理）
+  - name: "技术交流"      # 社区名称（Web 界面按此管理）
     plugin: flarum       # 插件名
     enabled: true
     model: "qwen2.5:7b"  # 本社区用的模型（留空用 default_model）
     url: "https://example.com"
-    tag_filter: "communicate"
+    tag_filter: "tech"
     # token 从环境变量 FLARUM_TOKEN 读取，此处不写
 ```
 

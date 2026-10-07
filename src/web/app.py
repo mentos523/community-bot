@@ -373,6 +373,96 @@ def model_test():
     return jsonify({"ok": True, "latency": dt, "text": text})
 
 
+# ---------- 全局设置（回复规则 / 梯度轮询 / 提示词） ----------
+
+# 每个选项的详细说明（Web 表单用）
+SETTING_DEFS = [
+    ("rules", "回复规则", [
+        ("min_question_length", "问题最短长度", "integer",
+         "问题正文少于这么多字符就不回复（如“顶”、“？”）。默认 5。设为 0 则不限制。"),
+        ("skip_keywords", "跳过关键词（逗号分隔）", "string",
+         "内容包含这些词的消息不回复，如“测试,签到,广告”。多个词用英文逗号分隔。"),
+        ("always_reply_users", "必回用户（逗号分隔）", "string",
+         "名单里的用户每次都回复，不受“最短长度”和“跳过关键词”限制。填你的用户名，多个用英文逗号分隔。"),
+        ("max_replies_per_discussion_per_day", "单讨论每日最多回复", "integer",
+         "同一个讨论（帖子/话题）每天最多回复几次，防止在同一个帖子里刷屏。默认 2。"),
+        ("max_replies_per_day", "全站每日最多回复", "integer",
+         "所有社区加起来每天最多回复几次，控制模型调用量和费用。默认 20，可按你的需求调大或调小。"),
+    ]),
+    ("rules.reply_style", "回复风格", [
+        ("max_length", "回复最长字符数", "integer",
+         "超过此长度的回复会被按句子截断，保证不断句。默认 800。"),
+        ("no_trailing", "不加客套结尾", "boolean",
+         "勾选后回复末尾不加“还有什么问题可以问我”之类的客套话。"),
+    ]),
+    ("tiers", "梯度轮询（省浏览量）", [
+        ("hot_interval", "Hot 检查间隔（秒）", "integer",
+         "1 小时内有新回帖的讨论属于 Hot，每隔这么多秒检查一次。默认 60 秒。"),
+        ("warm_interval", "Warm 检查间隔（秒）", "integer",
+         "1–24 小时无新回帖的讨论属于 Warm，每隔这么多秒检查一次。默认 1800 秒（30 分钟）。"),
+        ("cold_interval", "Cold 检查间隔（秒）", "integer",
+         "24 小时–3 天无新回帖的讨论属于 Cold，每隔这么多秒检查一次。默认 604800 秒（7 天）。超过 3 天无活动的归档后不再进详情。"),
+    ]),
+    ("prompts", "提示词", [
+        ("bot_name", "机器人自称", "string",
+         "机器人在提示词里的自称，如“助教”、“小帮手”。默认“助教”。"),
+        ("template", "完整版提示词模板", "text",
+         "{bot_name} 会被替换为上面的自称，{content} 会被替换为用户的问题。每次生成回复都用这个模板。"),
+        ("short_template", "简化版提示词模板（重试用）", "text",
+         "完整版生成后校验失败时，用这个简化模板重试一次。"),
+    ]),
+]
+
+
+def _get_nested(cfg: dict, path: str):
+    cur = cfg
+    for p in path.split("."):
+        cur = cur.get(p, {}) if isinstance(cur, dict) else {}
+    return cur if isinstance(cur, dict) else {}
+
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings():
+    cfg = cs.load_config()
+    if request.method == "POST":
+        for section, _, fields in SETTING_DEFS:
+            for key, _, ftype, _ in fields:
+                form_key = section.replace(".", "_") + "__" + key
+                raw = request.form.get(form_key, "").strip()
+                # 定位到嵌套 dict
+                target = cfg
+                parts = section.split(".")
+                for p in parts:
+                    target = target.setdefault(p, {})
+                if ftype == "boolean":
+                    target[key] = form_key in request.form
+                elif ftype == "integer":
+                    try:
+                        target[key] = int(raw)
+                    except ValueError:
+                        pass  # 非法输入保留原值
+                elif key in ("skip_keywords", "always_reply_users"):
+                    target[key] = [w.strip() for w in raw.split(",") if w.strip()]
+                else:
+                    target[key] = raw
+        cs.save_config(cfg)
+        return redirect("/settings?saved=1")
+    # 准备显示值
+    sections = []
+    for section, title, fields in SETTING_DEFS:
+        data = _get_nested(cfg, section)
+        items = []
+        for key, label, ftype, desc in fields:
+            v = data.get(key, "")
+            if key in ("skip_keywords", "always_reply_users") and isinstance(v, list):
+                v = ",".join(v)
+            items.append({"key": key, "label": label, "type": ftype, "desc": desc,
+                          "value": v, "form_key": section.replace(".", "_") + "__" + key})
+        sections.append({"title": title, "items": items})
+    return render_template("settings.html", sections=sections,
+                           saved=request.args.get("saved"))
+
+
 # ---------- 日志查看 ----------
 
 @app.route("/logs")

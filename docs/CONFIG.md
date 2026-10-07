@@ -16,14 +16,14 @@ python -m src.main
 ```yaml
 # ===== 社区（可多个，每个独立选插件和模型）=====
 communities:
-  - name: "学习交流"
+  - name: "技术交流"
     plugin: flarum            # 插件名 = plugins/ 下的目录名
     enabled: true
     model: "qwen2.5:7b"       # 本社区用的模型（不填则用 default_model）
     url: "https://example.com"
     # 认证走环境变量：FLARUM_TOKEN（推荐）或 FLARUM_USERNAME / FLARUM_PASSWORD
     #   401/403 时用账号密码自动重新登录换 token
-    tag_filter: "communicate" # 只处理该标签，留空则全板块
+    tag_filter: "tech" # 只处理该标签，留空则全板块
     # bot_name: "助教"        # 本社区的机器人自称（可选）
 
 # ===== 模型（本地/远端/商业可混用）=====
@@ -82,7 +82,7 @@ prompts:
 rules:
   min_question_length: 5       # 问题最短字符数
   skip_keywords: ["测试", "test", "签到"]
-  always_reply_users: ["robbin"]  # 名单用户每次都回，不受门槛限制
+  always_reply_users: ["your_username"]  # 名单用户每次都回，不受门槛限制
   max_replies_per_discussion_per_day: 2
   max_replies_per_day: 20
   reply_style:

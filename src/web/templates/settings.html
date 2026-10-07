@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}全局设置 - 社区机器人{% endblock %}
+{% block content %}
+<h2>全局设置</h2>
+{% if saved %}<p class="hint" style="color:green">已保存，守护进程将在下次轮询时自动生效（最多 60 秒）。</p>{% endif %}
+<p class="hint">这里的每一项都有详细说明。改完点“保存”即时写回 config.yaml，无需重启。</p>
+
+<form method="post">
+{% for sec in sections %}
+<div class="card">
+  <h3>{{ sec.title }}</h3>
+  {% for f in sec.items %}
+  <div class="field">
+    <label>{{ f.label }}</label>
+    {% if f.type == "boolean" %}
+      <input type="checkbox" name="{{ f.form_key }}" value="1" {% if f.value %}checked{% endif %}>
+    {% elif f.type == "text" %}
+      <textarea name="{{ f.form_key }}" rows="6" style="width:100%">{{ f.value }}</textarea>
+    {% elif f.type == "integer" %}
+      <input type="number" name="{{ f.form_key }}" value="{{ f.value }}" style="width:120px">
+    {% else %}
+      <input type="text" name="{{ f.form_key }}" value="{{ f.value }}" style="width:60%">
+    {% endif %}
+    <div class="hint">{{ f.desc }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+<button type="submit">保存</button>
+</form>
+{% endblock %}

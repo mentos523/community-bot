@@ -31,7 +31,7 @@ config_schema:
     type: string
     required: false
     default: ""
-    description: 标签过滤，如 communicate（留空则全板块）
+    description: 标签过滤，如 tech（留空则全板块）
 
 capabilities:
   - fetch_updates

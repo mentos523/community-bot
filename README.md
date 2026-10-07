@@ -31,7 +31,7 @@ Web 管理界面：`http://localhost:52323`
 
 ```yaml
 communities:
-  - name: "学习交流"
+  - name: "技术交流"
     platform: flarum
     url: "https://example.com"
     # ... 平台相关配置
