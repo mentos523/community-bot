@@ -1,0 +1,5 @@
+# 社区机器人依赖
+# 安装：pip install -r requirements.txt
+
+PyYAML>=6.0          # 配置文件和插件 manifest 解析
+Flask>=3.0           # Web 管理界面（仅 Web 功能需要）

@@ -13,17 +13,27 @@
 ## 快速开始
 
 ```bash
-# 1. 复制配置
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 复制配置
 cp config/config.example.yaml config/config.yaml
 
-# 2. 编辑配置（社区、模型、规则）
+# 3. 编辑配置（社区、模型、规则）
 vim config/config.yaml
 
-# 3. 启动
+# 4. 启动守护进程
 python -m src.main
+
+# 5. 启动 Web 管理（另开一个终端）
+export WEB_PASSWORD="你的管理密码"   # 必设，否则 Web 锁定无法登录
+python -m src.web.app
 ```
 
-Web 管理界面：`http://localhost:52323`
+Web 管理界面：`http://localhost:52323`（默认只监听本机）
+
+详细配置说明见 [docs/CONFIG.md](docs/CONFIG.md)，
+本地模型配置见 [docs/LOCAL_MODELS.md](docs/LOCAL_MODELS.md)。
 
 ## 配置说明
 
