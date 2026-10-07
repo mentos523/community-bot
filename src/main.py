@@ -79,24 +79,36 @@ def build_scheduler(config: dict, log: logging.Logger) -> Scheduler:
     manifests = {m["_name"]: m for m in discover_plugins()}
     log.info(f"发现插件: {sorted(manifests)}")
     adapters = {}
-    for comm in config.get("communities", []):
+    seen_names = set()  # R2-N9：检测重名社区
+    for comm in config.get("communities") or []:  # R2-M2：显式 null 兜底
+        if not isinstance(comm, dict):
+            log.error(f"社区配置条目不是 dict，已跳过: {comm!r:.80}")
+            continue
+        cname = comm.get("name") or "<unnamed>"
+        if cname in seen_names:
+            log.error(f"[{cname}] 社区名称重复，已跳过该条目")
+            continue
+        seen_names.add(cname)
+        if not comm.get("name"):
+            log.error("社区配置缺少 name，已跳过")
+            continue
         if not comm.get("enabled", True):
-            log.info(f"[{comm.get('name')}] 已禁用，跳过")
+            log.info(f"[{cname}] 已禁用，跳过")
             continue
         plugin = comm.get("plugin", "")
         if plugin not in manifests:
-            log.error(f"[{comm.get('name')}] 插件不存在: {plugin}")
+            log.error(f"[{cname}] 插件不存在: {plugin}")
             continue
         cfg = resolve_community_config(comm, manifests)
         errors = validate_plugin_config(manifests[plugin], cfg)
         if errors:
-            log.error(f"[{comm.get('name')}] 配置错误: {'; '.join(errors)}")
+            log.error(f"[{cname}] 配置错误: {'; '.join(errors)}")
             continue
         try:
             adapters[comm["name"]] = load_adapter(plugin, cfg)
-            log.info(f"[{comm['name']}] 适配器加载成功 ({plugin})")
+            log.info(f"[{cname}] 适配器加载成功 ({plugin})")
         except Exception:
-            log.exception(f"[{comm['name']}] 适配器加载失败")
+            log.exception(f"[{cname}] 适配器加载失败")
     if not adapters:
         # S5：抛异常而不是 sys.exit，由调用方决定是退出（初始启动）还是保留旧调度器（热重载）
         raise BuildError("没有可用的社区适配器")
@@ -119,12 +131,20 @@ def main():
         log.error(f"{e}，退出")
         sys.exit(1)
     last_mtime = os.path.getmtime(CONFIG_PATH)
+    config_missing_warned = False  # R2-N1：配置文件被删后只告警一次
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
     # 主循环：轮询 + 配置热重载
     while not _stop_requested:
         try:
-            mtime = os.path.getmtime(CONFIG_PATH)
+            try:
+                mtime = os.path.getmtime(CONFIG_PATH)
+            except FileNotFoundError:
+                # R2-N1：配置文件被删除时不再每轮刷屏，只告警一次并停止热重载检查
+                if not config_missing_warned:
+                    log.error(f"配置文件不存在: {CONFIG_PATH}，停止热重载检查，继续用旧配置运行")
+                    config_missing_warned = True
+                mtime = last_mtime
             if mtime != last_mtime:
                 log.info("检测到配置变更，热重载")
                 try:
@@ -134,6 +154,12 @@ def main():
                     # S5：热重载失败保留旧调度器继续跑，不杀进程
                     log.exception("配置热重载失败，保留旧配置继续运行")
                 else:
+                    # R2-M5：迁移去重集合，避免热重载后重复回复
+                    new_sched._seen_ids = sched._seen_ids
+                    new_sched._seen_order = sched._seen_order
+                    new_sched._sent_fingerprints = sched._sent_fingerprints
+                    new_sched._sent_fp_order = sched._sent_fp_order
+                    new_sched._bot_id_warned = sched._bot_id_warned
                     config, sched = new_config, new_sched
                     last_mtime = mtime
                     log.info("配置热重载成功")

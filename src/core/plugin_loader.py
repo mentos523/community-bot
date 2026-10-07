@@ -1,9 +1,12 @@
 """插件加载器：扫描 plugins/ 目录，按 manifest.yaml 加载适配器。"""
+import logging
 import os
 import re
 import sys
 import yaml
 import importlib.util
+
+log = logging.getLogger(__name__)
 
 PLUGINS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "plugins")
 
@@ -19,8 +22,13 @@ def discover_plugins():
     for name in sorted(os.listdir(PLUGINS_DIR)):
         manifest_path = os.path.join(PLUGINS_DIR, name, "manifest.yaml")
         if os.path.isfile(manifest_path):
-            with open(manifest_path, encoding="utf-8") as f:
-                m = yaml.safe_load(f) or {}
+            try:
+                with open(manifest_path, encoding="utf-8") as f:
+                    m = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                # R2-M10：单个 manifest 损坏只跳过该插件，不拖垮整页
+                log.warning(f"插件 {name} 的 manifest.yaml 解析失败，已跳过: {e}")
+                continue
             m["_dir"] = os.path.join(PLUGINS_DIR, name)
             m["_name"] = name
             plugins.append(m)

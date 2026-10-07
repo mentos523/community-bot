@@ -1,9 +1,14 @@
 """模型管理器：统一 generate() 接口，支持本地/远端/商业模型。
 
 密钥一律从环境变量读取，不硬编码，不写进配置文件。
+
+R2-S3：熔断器——某模型连续失败 N 次后熔断 M 分钟（期间直接抛错不请求），
+避免 Ollama 宕机时重试风暴拖死全局；熔断期过后允许一次试探，成功即恢复。
 """
 import json
 import os
+import threading
+import time
 import urllib.request
 import urllib.error
 
@@ -14,7 +19,11 @@ DEFAULT_ENV_KEY = {
     "anthropic": "ANTHROPIC_API_KEY",
 }
 
-REQUEST_TIMEOUT = 120  # M2：模型生成超时（秒）。单线程调度，超时太长会卡住所有社区
+REQUEST_TIMEOUT = 120  # M2：模型生成超时（秒）。R2-S1 后已在线程内，不阻塞其他社区
+
+# R2-S3：熔断器参数
+CIRCUIT_FAIL_THRESHOLD = 3      # 连续失败几次后熔断
+CIRCUIT_OPEN_SECONDS = 300      # 熔断时长（秒）
 
 
 class ModelError(Exception):
@@ -40,6 +49,9 @@ def _post_json(url: str, payload: dict, headers: dict | None = None,
 class ModelManager:
     def __init__(self, models_cfg: list[dict] | None):
         self.models = {m["name"]: m for m in (models_cfg or []) if m.get("name")}
+        # R2-S3：熔断器状态 {model_name: {"fails": int, "open_until": float}}
+        self._cb_lock = threading.Lock()
+        self._cb: dict = {}
 
     def list_models(self) -> list[str]:
         return list(self.models)
@@ -67,12 +79,44 @@ class ModelManager:
             return os.environ.get(env_name, "")
         return ""
 
+    def _cb_check(self, model_name: str):
+        """R2-S3：熔断检查。熔断期内直接抛错，不发起请求。"""
+        with self._cb_lock:
+            st = self._cb.get(model_name)
+            if st and st.get("open_until", 0) > time.time():
+                raise ModelError(f"模型 {model_name} 熔断中（连续失败 {st['fails']} 次），稍后再试")
+
+    def _cb_record_success(self, model_name: str):
+        with self._cb_lock:
+            self._cb.pop(model_name, None)
+
+    def _cb_record_failure(self, model_name: str):
+        """R2-S3：记录一次失败，达到阈值则熔断。"""
+        with self._cb_lock:
+            st = self._cb.setdefault(model_name, {"fails": 0, "open_until": 0})
+            st["fails"] += 1
+            if st["fails"] >= CIRCUIT_FAIL_THRESHOLD:
+                st["open_until"] = time.time() + CIRCUIT_OPEN_SECONDS
+
     def generate(self, model_name: str, prompt: str,
                  options: dict | None = None) -> str:
         """统一生成接口。options 如 {"temperature": 0.7, "num_predict": 1500}。"""
         cfg = self.models.get(model_name)
         if not cfg:
             raise ModelError(f"未配置模型: {model_name}")
+        # R2-S3：先过熔断器（"未配置模型"这类配置错误不计入熔断）
+        self._cb_check(model_name)
+        try:
+            text = self._dispatch(cfg, prompt, options)
+        except Exception:
+            self._cb_record_failure(model_name)
+            raise
+        self._cb_record_success(model_name)
+        return text
+
+    def _dispatch(self, cfg: dict, prompt: str,
+                  options: dict | None) -> str:
+        """按类型分发到具体后端（原 generate 的分发逻辑）。"""
         t = cfg.get("type", "local")
         if t == "local":
             return self._ollama(cfg, prompt, options)

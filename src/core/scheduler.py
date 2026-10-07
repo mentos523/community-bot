@@ -1,8 +1,15 @@
-"""主调度循环：每 60 秒拉各社区轻量列表，按梯度决定是否进详情。"""
+"""主调度循环：每 60 秒拉各社区轻量列表，按梯度决定是否进详情。
+
+R2-S1：每个社区独立线程轮询（ThreadPoolExecutor），单个社区 hang 住
+不拖死全局。共享状态（state/_seen_ids）用 RLock 保护。
+R2-S2：state.json 定期清理 + dirty 标记，无变化不写盘。
+"""
 import hashlib
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from src.core.base import AuthError
@@ -11,6 +18,8 @@ from src.core.generator import generate_reply
 
 POLL_INTERVAL = 60  # 主循环：每 60 秒拉一次轻量列表（不产生浏览量）
 SEEN_IDS_CAP = 5000  # S3：已处理消息 ID 去重集合上限（防内存膨胀）
+MAX_WORKERS = 8  # R2-S1：社区轮询线程池上限
+PRUNE_DAYS = 30  # R2-S2：archived 且超 N 天无活动的会话从 state 删除
 
 
 def _parse_iso(s: str | None):
@@ -38,7 +47,10 @@ class Scheduler:
         self.mm = model_manager
         self.state_path = state_path
         self.log = logger
+        # R2-S1：所有共享可变状态用同一把 RLock 保护
+        self._lock = threading.RLock()
         self.state = self._load_state()
+        self._dirty = False  # R2-S2：state 有变化才写盘
         # S3：纵深防御——已处理过的消息 ID（本进程回复过的也在这里），
         # 即使插件没提供 bot_user_id，也不会重复处理/自回环
         self._seen_ids: set = set()
@@ -54,33 +66,92 @@ class Scheduler:
         try:
             with open(self.state_path, encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            # R2-M9：损坏时备份再重置，避免水位全丢无声无息
+            try:
+                ts = datetime.now().strftime("%Y%m%d%H%M%S")
+                bad = f"{self.state_path}.corrupt.{ts}"
+                os.replace(self.state_path, bad)
+                self.log.error(f"state.json 损坏（{e}），已备份为 {bad}，状态重置")
+            except Exception as be:
+                self.log.error(f"state.json 损坏且备份失败: {be}")
             return {}
 
+    def _mark_dirty(self):
+        self._dirty = True
+
     def _save_state(self):
-        try:
-            os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
-            tmp = self.state_path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.state, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, self.state_path)
-        except Exception as e:
-            self.log.warning(f"保存状态失败: {e}")
+        # R2-S2：无变化不写盘
+        with self._lock:
+            if not self._dirty:
+                return
+            try:
+                os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
+                tmp = self.state_path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(self.state, f, ensure_ascii=False, indent=2)
+                os.replace(tmp, self.state_path)
+                self._dirty = False
+            except Exception as e:
+                self.log.warning(f"保存状态失败: {e}")
+
+    def _prune_state(self):
+        """R2-S2：每天清理一次——删除 archived 且超 PRUNE_DAYS 无活动的会话。"""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with self._lock:
+            meta = self.state.setdefault("communities", {})  # noqa: F841
+            m = self.state.setdefault("_meta", {})
+            if m.get("last_prune") == today:
+                return
+            now = datetime.now(timezone.utc)
+            removed = 0
+            comms = self.state.get("communities") or {}
+            for comm_name in list(comms.keys()):
+                convs = comms.get(comm_name) or {}
+                if not isinstance(convs, dict):
+                    continue
+                for conv_id in list(convs.keys()):
+                    rec = convs.get(conv_id) or {}
+                    if rec.get("tier") != "archived":
+                        continue
+                    la = _parse_iso(rec.get("last_activity"))
+                    if la and (now - la).days > PRUNE_DAYS:
+                        del convs[conv_id]
+                        removed += 1
+            m["last_prune"] = today
+            if removed:
+                self._mark_dirty()
+                self.log.info(f"state 清理：删除 {removed} 个过期归档会话")
 
     def _conv_rec(self, comm_name: str, conv_id: str) -> dict:
-        return (self.state.setdefault("communities", {})
-                .setdefault(comm_name, {})
-                .setdefault(str(conv_id), {}))
+        with self._lock:
+            comms = self.state.setdefault("communities", {})
+            convs = comms.setdefault(comm_name, {})
+            key = str(conv_id)
+            if key not in convs:
+                convs[key] = {}
+                self._mark_dirty()
+            return convs[key]
+
+    def _set_rec(self, rec: dict, key: str, value):
+        """R2-S2：只有值真正变化时才写 + 标 dirty。"""
+        with self._lock:
+            if rec.get(key) != value:
+                rec[key] = value
+                self._mark_dirty()
 
     def _remember_seen(self, msg_id: str):
         """记录已处理的消息 ID，超上限时淘汰最旧的。"""
-        if msg_id in self._seen_ids:
-            return
-        self._seen_ids.add(msg_id)
-        self._seen_order.append(msg_id)
-        if len(self._seen_order) > SEEN_IDS_CAP:
-            old = self._seen_order.pop(0)
-            self._seen_ids.discard(old)
+        with self._lock:
+            if msg_id in self._seen_ids:
+                return
+            self._seen_ids.add(msg_id)
+            self._seen_order.append(msg_id)
+            if len(self._seen_order) > SEEN_IDS_CAP:
+                old = self._seen_order.pop(0)
+                self._seen_ids.discard(old)
 
     # ---- 主循环 ----
 
@@ -94,25 +165,51 @@ class Scheduler:
             time.sleep(POLL_INTERVAL)
 
     def poll_once(self):
-        rules = self.config.get("rules", {})
-        tiers_cfg = self.config.get("tiers", {})
+        # R2-M2：显式 null 时用 or 兜底，避免 for None 崩溃
+        rules = self.config.get("rules") or {}
+        tiers_cfg = self.config.get("tiers") or {}
         intervals = {
             "hot": tiers_cfg.get("hot_interval", 60),
             "warm": tiers_cfg.get("warm_interval", 1800),
             "cold": tiers_cfg.get("cold_interval", 604800),
         }
         default_model = self.config.get("default_model")
-        for comm in self.config.get("communities", []):
-            if not comm.get("enabled", True):
-                continue
-            adapter = self.adapters.get(comm["name"])
-            if not adapter:
-                continue
-            try:
-                self._poll_community(comm, adapter, rules, intervals, default_model)
-            except Exception:
-                self.log.exception(f"[{comm['name']}] 社区轮询异常")
+        comms = self.config.get("communities") or []
+        # R2-S1：每个社区独立线程轮询，单个 hang 住不拖死全局
+        workers = max(1, min(len(comms), MAX_WORKERS))
+        with ThreadPoolExecutor(max_workers=workers,
+                                thread_name_prefix="poll") as ex:
+            futures = [ex.submit(self._poll_one, comm, rules, intervals,
+                                 default_model)
+                       for comm in comms]
+            for f in futures:
+                try:
+                    f.result()
+                except Exception:
+                    self.log.exception("社区轮询线程异常")
+        self._prune_state()
         self._save_state()
+
+    def _poll_one(self, comm, rules: dict, intervals: dict,
+                  default_model: str | None):
+        """R2-M1：单个社区的完整处理（含配置校验），异常只影响本社区。"""
+        try:
+            if not isinstance(comm, dict):
+                self.log.error(f"社区配置条目不是 dict，已跳过: {comm!r:.80}")
+                return
+            name = comm.get("name") or "<unnamed>"
+            if not comm.get("name"):
+                self.log.error("社区配置缺少 name，已跳过")
+                return
+            if not comm.get("enabled", True):
+                return
+            adapter = self.adapters.get(comm.get("name"))
+            if not adapter:
+                self.log.error(f"[{name}] 没有加载的适配器，跳过")
+                return
+            self._poll_community(comm, adapter, rules, intervals, default_model)
+        except Exception:
+            self.log.exception(f"[{comm.get('name') if isinstance(comm, dict) else comm}] 社区轮询异常")
 
     # ---- 带认证重试的调用 ----
 
@@ -165,17 +262,17 @@ class Scheduler:
             else:
                 new_activity = latest_dt is not None and latest_dt > old_dt
             if latest:
-                rec["last_activity"] = latest
+                self._set_rec(rec, "last_activity", latest)
             if new_activity:
-                rec["tier"] = "hot"
-                rec["last_check"] = now_iso
+                self._set_rec(rec, "tier", "hot")
+                self._set_rec(rec, "last_check", now_iso)
                 self._check_conversation(comm, adapter, conv_id, rec, rules, default_model)
                 continue
             # 无新活动：按梯度决定是否到期
-            rec["tier"] = get_tier(rec.get("last_activity"))
+            self._set_rec(rec, "tier", get_tier(rec.get("last_activity")))
             if not tier_due(rec["tier"], rec.get("last_check"), intervals):
                 continue
-            rec["last_check"] = now_iso
+            self._set_rec(rec, "last_check", now_iso)
             self._check_conversation(comm, adapter, conv_id, rec, rules, default_model)
 
     def _check_conversation(self, comm: dict, adapter, conv_id: str,
@@ -201,14 +298,14 @@ class Scheduler:
             if last_seen is not None and _parse_iso(m.created_at) <= last_seen:
                 continue
             if m.id in self._seen_ids:
-                rec["last_seen_at"] = m.created_at
+                self._set_rec(rec, "last_seen_at", m.created_at)
                 continue
             if bot_id and m.author_id == bot_id:
-                rec["last_seen_at"] = m.created_at  # 自己的消息，水位直接过
+                self._set_rec(rec, "last_seen_at", m.created_at)  # 自己的消息，水位直接过
                 continue
             if self._is_own_echo(conv_id, m):
                 self.log.info(f"[{name}] 跳过疑似自身发出的回复 {m.id}")
-                rec["last_seen_at"] = m.created_at
+                self._set_rec(rec, "last_seen_at", m.created_at)
                 continue
             try:
                 handled = self._maybe_reply(comm, adapter, m, rules, default_model)
@@ -218,7 +315,7 @@ class Scheduler:
             if not handled:
                 break  # S4：未处理成功不推进水位，下轮重试；本轮不再处理更后面的
             self._remember_seen(m.id)
-            rec["last_seen_at"] = m.created_at
+            self._set_rec(rec, "last_seen_at", m.created_at)
 
     def _fingerprint(self, conv_id: str, text: str) -> tuple:
         """S3：自发回复的内容指纹（会话 ID + 正文前 200 字哈希）。"""
@@ -226,11 +323,12 @@ class Scheduler:
                 hashlib.sha256(text.strip()[:200].encode("utf-8")).hexdigest())
 
     def _remember_fingerprint(self, conv_id: str, text: str):
-        fp = self._fingerprint(conv_id, text)
-        self._sent_fingerprints.add(fp)
-        self._sent_fp_order.append(fp)
-        if len(self._sent_fp_order) > SEEN_IDS_CAP:
-            self._sent_fingerprints.discard(self._sent_fp_order.pop(0))
+        with self._lock:
+            fp = self._fingerprint(conv_id, text)
+            self._sent_fingerprints.add(fp)
+            self._sent_fp_order.append(fp)
+            if len(self._sent_fp_order) > SEEN_IDS_CAP:
+                self._sent_fingerprints.discard(self._sent_fp_order.pop(0))
 
     def _is_own_echo(self, conv_id: str, msg) -> bool:
         """ incoming 消息内容与本进程发过的回复一致 → 判定为自身回声。"""
@@ -246,22 +344,26 @@ class Scheduler:
 
     def _check_rate_limit(self, comm_name: str, conv_id: str, rules: dict) -> bool:
         """频率控制：每天总量 + 每会话量。"""
-        today = self._today()
-        c = self.state.setdefault("counters", {}).setdefault(comm_name, {})
-        if c.get("date") != today:
-            c.clear()
-            c["date"] = today
-        if c.get("total", 0) >= rules.get("max_replies_per_day", 20):
-            return False
-        convs = c.setdefault("convs", {})
-        if convs.get(str(conv_id), 0) >= rules.get("max_replies_per_discussion_per_day", 2):
-            return False
-        return True
+        with self._lock:
+            today = self._today()
+            c = self.state.setdefault("counters", {}).setdefault(comm_name, {})
+            if c.get("date") != today:
+                c.clear()
+                c["date"] = today
+                self._mark_dirty()
+            if c.get("total", 0) >= rules.get("max_replies_per_day", 20):
+                return False
+            convs = c.setdefault("convs", {})
+            if convs.get(str(conv_id), 0) >= rules.get("max_replies_per_discussion_per_day", 2):
+                return False
+            return True
 
     def _bump_rate_limit(self, comm_name: str, conv_id: str):
-        c = self.state["counters"][comm_name]
-        c["total"] = c.get("total", 0) + 1
-        c.setdefault("convs", {})[str(conv_id)] = c["convs"].get(str(conv_id), 0) + 1
+        with self._lock:
+            c = self.state["counters"][comm_name]
+            c["total"] = c.get("total", 0) + 1
+            c.setdefault("convs", {})[str(conv_id)] = c["convs"].get(str(conv_id), 0) + 1
+            self._mark_dirty()
 
     def _maybe_reply(self, comm: dict, adapter, msg, rules: dict,
                      default_model: str | None) -> bool:
@@ -291,14 +393,28 @@ class Scheduler:
             self.log.error("未配置 default_model，无法生成回复")
             return False
         style = rules.get("reply_style", {})
+        prompts_cfg = self.config.get("prompts") or {}
         text, reason = generate_reply(
             self.mm, model_name, content,
             bot_name=comm.get("bot_name", "助教"),
             max_length=style.get("max_length", 0),
             options=self.mm.get_options(model_name),
             logger=self.log,
-            prompts_cfg=self.config.get("prompts", {}),
+            prompts_cfg=prompts_cfg,
         )
+        # R2-M6：主模型调用失败时，用备用模型重试一次
+        if not text and reason.startswith("模型调用失败"):
+            fb = self.config.get("fallback_model")
+            if fb and fb != model_name:
+                self.log.warning(f"[{name}] 主模型 {model_name} 失败，尝试备用模型 {fb}")
+                text, reason = generate_reply(
+                    self.mm, fb, content,
+                    bot_name=comm.get("bot_name", "助教"),
+                    max_length=style.get("max_length", 0),
+                    options=self.mm.get_options(fb),
+                    logger=self.log,
+                    prompts_cfg=prompts_cfg,
+                )
         if not text:
             self.log.warning(f"[{name}] {msg.conversation_id} 生成失败: {reason}")
             return False

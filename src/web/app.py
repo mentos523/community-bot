@@ -33,6 +33,12 @@ else:
     app.secret_key = os.urandom(32)
     print("警告: 未设置 WEB_SECRET_KEY，已生成随机密钥（重启后登录态失效）")
 
+# R2-N6：session cookie 硬化
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
+
 
 # ---------- 登录鉴权（S1） ----------
 
@@ -62,6 +68,9 @@ def login():
         if _password_ok(request.form.get("password", "")):
             session["authed"] = True
             nxt = request.args.get("next") or url_for("dashboard")
+            # R2-N4：只允许站内跳转，防开放重定向
+            if not (nxt.startswith("/") and not nxt.startswith("//")):
+                nxt = url_for("dashboard")
             return redirect(nxt)
         flash("密码错误")
     return render_template("login.html", pw_set=pw_set)
@@ -379,39 +388,83 @@ def model_test():
 SETTING_DEFS = [
     ("rules", "回复规则", [
         ("min_question_length", "问题最短长度", "integer",
-         "问题正文少于这么多字符就不回复（如“顶”、“？”）。默认 5。设为 0 则不限制。"),
+         "问题正文少于这么多字符就不回复（如“顶”、“？”）。默认 5。设为 0 则不限制。",
+         {"min": 0, "max": 1000}),
         ("skip_keywords", "跳过关键词（逗号分隔）", "string",
-         "内容包含这些词的消息不回复，如“测试,签到,广告”。多个词用英文逗号分隔。"),
+         "内容包含这些词的消息不回复，如“测试,签到,广告”。多个词用英文逗号分隔。",
+         {}),
         ("always_reply_users", "必回用户（逗号分隔）", "string",
-         "名单里的用户每次都回复，不受“最短长度”和“跳过关键词”限制。填你的用户名，多个用英文逗号分隔。"),
+         "名单里的用户每次都回复，不受“最短长度”和“跳过关键词”限制。填你的用户名，多个用英文逗号分隔。",
+         {}),
         ("max_replies_per_discussion_per_day", "单讨论每日最多回复", "integer",
-         "同一个讨论（帖子/话题）每天最多回复几次，防止在同一个帖子里刷屏。默认 2。"),
+         "同一个讨论（帖子/话题）每天最多回复几次，防止在同一个帖子里刷屏。默认 2。",
+         {"min": 0, "max": 100}),
         ("max_replies_per_day", "全站每日最多回复", "integer",
-         "所有社区加起来每天最多回复几次，控制模型调用量和费用。默认 20，可按你的需求调大或调小。"),
+         "所有社区加起来每天最多回复几次，控制模型调用量和费用。默认 20，可按你的需求调大或调小。",
+         {"min": 0, "max": 10000}),
     ]),
     ("rules.reply_style", "回复风格", [
         ("max_length", "回复最长字符数", "integer",
-         "超过此长度的回复会被按句子截断，保证不断句。默认 800。"),
+         "超过此长度的回复会被按句子截断，保证不断句。默认 800。",
+         {"min": 50, "max": 10000}),
         ("no_trailing", "不加客套结尾", "boolean",
-         "勾选后回复末尾不加“还有什么问题可以问我”之类的客套话。"),
+         "勾选后回复末尾不加“还有什么问题可以问我”之类的客套话。",
+         {}),
     ]),
     ("tiers", "梯度轮询（省浏览量）", [
         ("hot_interval", "Hot 检查间隔（秒）", "integer",
-         "1 小时内有新回帖的讨论属于 Hot，每隔这么多秒检查一次。默认 60 秒。"),
+         "1 小时内有新回帖的讨论属于 Hot，每隔这么多秒检查一次。默认 60 秒。",
+         {"min": 10, "max": 86400}),
         ("warm_interval", "Warm 检查间隔（秒）", "integer",
-         "1–24 小时无新回帖的讨论属于 Warm，每隔这么多秒检查一次。默认 1800 秒（30 分钟）。"),
+         "1–24 小时无新回帖的讨论属于 Warm，每隔这么多秒检查一次。默认 1800 秒（30 分钟）。",
+         {"min": 10, "max": 86400}),
         ("cold_interval", "Cold 检查间隔（秒）", "integer",
-         "24 小时–3 天无新回帖的讨论属于 Cold，每隔这么多秒检查一次。默认 604800 秒（7 天）。超过 3 天无活动的归档后不再进详情。"),
+         "24 小时–3 天无新回帖的讨论属于 Cold，每隔这么多秒检查一次。默认 604800 秒（7 天）。超过 3 天无活动的归档后不再进详情。",
+         {"min": 10, "max": 2592000}),
     ]),
     ("prompts", "提示词", [
         ("bot_name", "机器人自称", "string",
-         "机器人在提示词里的自称，如“助教”、“小帮手”。默认“助教”。"),
+         "机器人在提示词里的自称，如“助教”、“小帮手”。默认“助教”。",
+         {}),
+        ("max_content_length", "用户内容截断长度（字符）", "integer",
+         "用户问题拼进提示词前的最大字符数，超长截断并标注。默认 3000，设为 0 则不截断。",
+         {"min": 0, "max": 50000}),
         ("template", "完整版提示词模板", "text",
-         "{bot_name} 会被替换为上面的自称，{content} 会被替换为用户的问题。每次生成回复都用这个模板。"),
+         "{bot_name} 会被替换为上面的自称，{content} 会被替换为用户的问题。每次生成回复都用这个模板。只允许 {bot_name} 和 {content} 两种占位符。",
+         {"template_check": True}),
         ("short_template", "简化版提示词模板（重试用）", "text",
-         "完整版生成后校验失败时，用这个简化模板重试一次。"),
+         "完整版生成后校验失败时，用这个简化模板重试一次。只允许 {bot_name} 和 {content} 两种占位符。",
+         {"template_check": True}),
     ]),
 ]
+
+# R2-M3：模板占位符白名单
+TEMPLATE_PLACEHOLDER_WHITELIST = {"bot_name", "content"}
+
+
+def _check_template_placeholders(tpl: str) -> list[str]:
+    """R2-M3：检查模板占位符是否都在白名单内，返回非法占位符列表。"""
+    import string
+    bad = []
+    try:
+        for _, field, _, _ in string.Formatter().parse(tpl):
+            if field and field not in TEMPLATE_PLACEHOLDER_WHITELIST:
+                bad.append(field)
+    except ValueError:
+        bad.append("<格式错误>")
+    return bad
+
+
+def _ensure_section(cfg: dict, section: str) -> dict:
+    """R2-M11：确保嵌套 section 是 dict（处理显式 null 的情况）。"""
+    target = cfg
+    for p in section.split("."):
+        nxt = target.get(p)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            target[p] = nxt
+        target = nxt
+    return target
 
 
 def _get_nested(cfg: dict, path: str):
@@ -425,34 +478,53 @@ def _get_nested(cfg: dict, path: str):
 def settings():
     cfg = cs.load_config()
     if request.method == "POST":
+        errors = []
+        staged = {}  # 先暂存，全部校验通过才写回
         for section, _, fields in SETTING_DEFS:
-            for key, _, ftype, _ in fields:
+            for key, label, ftype, _, opts in fields:
                 form_key = section.replace(".", "_") + "__" + key
                 raw = request.form.get(form_key, "").strip()
-                # 定位到嵌套 dict
-                target = cfg
-                parts = section.split(".")
-                for p in parts:
-                    target = target.setdefault(p, {})
                 if ftype == "boolean":
-                    target[key] = form_key in request.form
+                    staged[(section, key)] = form_key in request.form
                 elif ftype == "integer":
+                    # R2-M7：取值范围校验
                     try:
-                        target[key] = int(raw)
+                        v = int(raw)
                     except ValueError:
-                        pass  # 非法输入保留原值
+                        errors.append(f"「{label}」不是有效的整数，已保留原值")
+                        continue
+                    lo, hi = opts.get("min"), opts.get("max")
+                    if (lo is not None and v < lo) or (hi is not None and v > hi):
+                        errors.append(
+                            f"「{label}」超出允许范围（{lo}–{hi}），已保留原值")
+                        continue
+                    staged[(section, key)] = v
                 elif key in ("skip_keywords", "always_reply_users"):
-                    target[key] = [w.strip() for w in raw.split(",") if w.strip()]
+                    staged[(section, key)] = [w.strip() for w in raw.split(",") if w.strip()]
                 else:
-                    target[key] = raw
-        cs.save_config(cfg)
-        return redirect("/settings?saved=1")
+                    # R2-M3：模板占位符白名单校验
+                    if opts.get("template_check"):
+                        bad = _check_template_placeholders(raw)
+                        if bad:
+                            errors.append(
+                                f"「{label}」含非法占位符 {bad}，只允许 "
+                                "{bot_name} 和 {content}，已保留原值")
+                            continue
+                    staged[(section, key)] = raw
+        if errors:
+            for e in errors:
+                flash(e)
+        else:
+            for (section, key), v in staged.items():
+                _ensure_section(cfg, section)[key] = v  # R2-M11：null 安全
+            cs.save_config(cfg)
+            return redirect("/settings?saved=1")
     # 准备显示值
     sections = []
     for section, title, fields in SETTING_DEFS:
         data = _get_nested(cfg, section)
         items = []
-        for key, label, ftype, desc in fields:
+        for key, label, ftype, desc, _opts in fields:
             v = data.get(key, "")
             if key in ("skip_keywords", "always_reply_users") and isinstance(v, list):
                 v = ",".join(v)
@@ -477,7 +549,11 @@ def logs():
     lines, total = [], 0
     fp = os.path.join(cs.LOGS_DIR, sel)
     if sel and os.path.isfile(fp) and os.path.dirname(os.path.abspath(fp)) == os.path.abspath(cs.LOGS_DIR):
-        n = min(int(request.args.get("n", 200)), 2000)
+        # R2-M8：n 非法时回退 200，不再 500
+        try:
+            n = min(int(request.args.get("n", 200)), 2000)
+        except (ValueError, TypeError):
+            n = 200
         with open(fp, encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
         total = len(all_lines)
@@ -491,7 +567,12 @@ def main():
     cfg = cs.load_config()
     web = cfg.get("web") or {}
     host = web.get("host", "127.0.0.1")  # S1：默认只监听本机
-    port = int(web.get("port", 52323))
+    # R2-M8：port 非法时用默认 52323 并告警，不再直接崩溃
+    try:
+        port = int(web.get("port", 52323))
+    except (ValueError, TypeError):
+        print("错误: web.port 配置非法，已使用默认端口 52323")
+        port = 52323
     if not os.environ.get("WEB_PASSWORD"):
         print("警告: 未设置 WEB_PASSWORD 环境变量，Web 登录已锁定（所有页面需登录）")
     print(f"Web 管理端启动: http://{host}:{port}")
