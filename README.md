@@ -23,7 +23,7 @@ vim config/config.yaml
 python -m src.main
 ```
 
-Web 管理界面：`http://localhost:8080`
+Web 管理界面：`http://localhost:52323`
 
 ## 配置说明
 
