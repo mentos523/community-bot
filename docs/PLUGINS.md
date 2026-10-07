@@ -23,7 +23,7 @@ platform_type: forum        # forum | chat
 # 配置项定义：Web 界面据此自动生成配置表单
 config_schema:
   url:
-    type: string             # string | integer | boolean | password
+    type: string             # string | integer | boolean（密码框靠 secret 标记，不是 type）
     required: true           # 是否必填
     description: 论坛地址     # 表单上显示的说明
   token:
@@ -38,10 +38,10 @@ config_schema:
 ### 1. Web 界面（推荐）
 
 打开 `http://localhost:52323` → 插件管理：
-- 左侧列出所有已发现插件（自动扫描 `plugins/`）
-- 点插件进入配置页，表单由 `manifest.yaml` 的 `config_schema` 自动生成
-- `secret: true` 的字段用密码框，保存时加密存储
-- 点"测试连接"验证配置是否有效
+- 页面列出 `config.yaml` 里已配置的社区，可启用/禁用、点"配置"修改
+- 点"新增社区"可添加新社区：选插件（下拉，来自自动扫描 `plugins/` 的结果）→ 填社区名称 → 按该插件 `manifest.yaml` 的 `config_schema` 生成表单填写
+- 表单由 `config_schema` 自动生成，`secret: true` 的字段用密码框（留空表示保留原值）
+- **注意**：表单填写的值会**明文写入** `config.yaml`；密钥类建议走环境变量（表单下方会提示对应的环境变量名），不要填进表单
 - 保存后即时生效（热重载，无需重启）
 
 ### 2. 配置文件

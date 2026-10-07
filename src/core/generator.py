@@ -58,10 +58,13 @@ def generate_reply(model_manager, model_name: str, content: str,
     prompts_cfg: 配置文件 prompts 段，可含 bot_name/template/short_template/
     max_content_length。为空时用内置默认模板（向后兼容）。
 
+    bot_name 优先级：社区级 bot_name > prompts.bot_name > 默认"助教"。
+
     返回 (正文|None, 原因)。
     """
     prompts_cfg = prompts_cfg or {}
-    bot_name = prompts_cfg.get("bot_name", bot_name)
+    # U15：社区级 bot_name 优先（scheduler 传 comm.get("bot_name")，可能为 None）
+    bot_name = bot_name or prompts_cfg.get("bot_name") or "助教"
     # R2-M4：超长内容截断，避免 prompt 体积爆炸
     content = (content or "").strip()
     max_cl = prompts_cfg.get("max_content_length", DEFAULT_MAX_CONTENT_LENGTH)

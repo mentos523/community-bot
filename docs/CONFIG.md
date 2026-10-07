@@ -69,10 +69,13 @@ models:
 
 default_model: "qwen2.5:7b"   # 社区没单独指定 model 时用这个
 
+# fallback_model: "gpt-4o-mini"  # 备用模型：主模型失败时自动切换重试，不填则不启用
+
 # ===== 提示词（发给模型的指令模板）=====
 prompts:
-  bot_name: "助教"
+  bot_name: "助教"   # 全局默认自称；优先级：社区的 bot_name > 这里 > 默认"助教"
   # {bot_name} 和 {content} 会被自动替换
+  max_content_length: 3000  # 用户问题拼进提示词前的最大字符数，超长截断，0=不截断
   template: |
     你是{bot_name}，社区里的助教。
     ……（见 config.example.yaml 完整版）
@@ -118,7 +121,8 @@ web:
 | `OPENAI_API_KEY` | OpenAI API Key |
 | `GEMINI_API_KEY` | Google Gemini API Key |
 | `ANTHROPIC_API_KEY` | Anthropic API Key |
-| `WEB_PASSWORD` | Web 管理密码 |
+| `WEB_PASSWORD` | Web 管理密码（必须设置，否则 Web 登录锁定） |
+| `WEB_SECRET_KEY` | Web 会话密钥（不设则每次启动随机生成，重启后需重新登录） |
 
 各插件的完整 `env_var` 定义见 `plugins/<插件名>/manifest.yaml`。
 

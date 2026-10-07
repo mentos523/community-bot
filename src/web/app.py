@@ -188,6 +188,29 @@ def plugin_toggle(name):
     return redirect(url_for("plugins"))
 
 
+# U3：Web 新增社区（必须在 /plugins/<name> 之前注册，否则 "add" 被当作社区名）
+@app.route("/plugins/add", methods=["GET", "POST"])
+def plugin_add():
+    manifests = plugin_loader.discover_plugins()
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        plugin = request.form.get("plugin", "").strip()
+        valid_plugins = {m["_name"] for m in manifests}
+        if not name:
+            flash("社区名称不能为空")
+        elif plugin not in valid_plugins:
+            flash(f"未知的插件: {plugin}")
+        else:
+            cfg = cs.load_config()
+            if cs.add_community(cfg, name, plugin):
+                cs.save_config(cfg)
+                flash(f"社区 {name} 已创建，请继续填写插件配置")
+                return redirect(url_for("plugin_config", name=name))
+            else:
+                flash(f"社区名称已存在: {name}")
+    return render_template("plugin_add.html", manifests=manifests)
+
+
 @app.route("/plugins/<name>", methods=["GET", "POST"])
 def plugin_config(name):
     cfg = cs.load_config()
@@ -479,28 +502,32 @@ def settings():
     cfg = cs.load_config()
     if request.method == "POST":
         errors = []
-        staged = {}  # 先暂存，全部校验通过才写回
+        saved_count = 0
         for section, _, fields in SETTING_DEFS:
             for key, label, ftype, _, opts in fields:
                 form_key = section.replace(".", "_") + "__" + key
                 raw = request.form.get(form_key, "").strip()
+                value = None
+                ok = True
                 if ftype == "boolean":
-                    staged[(section, key)] = form_key in request.form
+                    value = form_key in request.form
                 elif ftype == "integer":
                     # R2-M7：取值范围校验
                     try:
                         v = int(raw)
                     except ValueError:
                         errors.append(f"「{label}」不是有效的整数，已保留原值")
-                        continue
-                    lo, hi = opts.get("min"), opts.get("max")
-                    if (lo is not None and v < lo) or (hi is not None and v > hi):
-                        errors.append(
-                            f"「{label}」超出允许范围（{lo}–{hi}），已保留原值")
-                        continue
-                    staged[(section, key)] = v
+                        ok = False
+                    else:
+                        lo, hi = opts.get("min"), opts.get("max")
+                        if (lo is not None and v < lo) or (hi is not None and v > hi):
+                            errors.append(
+                                f"「{label}」超出允许范围（{lo}–{hi}），已保留原值")
+                            ok = False
+                        else:
+                            value = v
                 elif key in ("skip_keywords", "always_reply_users"):
-                    staged[(section, key)] = [w.strip() for w in raw.split(",") if w.strip()]
+                    value = [w.strip() for w in raw.split(",") if w.strip()]
                 else:
                     # R2-M3：模板占位符白名单校验
                     if opts.get("template_check"):
@@ -509,16 +536,21 @@ def settings():
                             errors.append(
                                 f"「{label}」含非法占位符 {bad}，只允许 "
                                 "{bot_name} 和 {content}，已保留原值")
-                            continue
-                    staged[(section, key)] = raw
-        if errors:
-            for e in errors:
-                flash(e)
-        else:
-            for (section, key), v in staged.items():
-                _ensure_section(cfg, section)[key] = v  # R2-M11：null 安全
-            cs.save_config(cfg)
-            return redirect("/settings?saved=1")
+                            ok = False
+                        else:
+                            value = raw
+                    else:
+                        value = raw
+                if ok:
+                    # U11：合法字段独立保存，非法字段只保留原值
+                    _ensure_section(cfg, section)[key] = value
+                    saved_count += 1
+        cs.save_config(cfg)
+        for e in errors:
+            flash(e)
+        if saved_count:
+            flash(f"已保存 {saved_count} 项修改", "ok")
+        return redirect("/settings?saved=1")
     # 准备显示值
     sections = []
     for section, title, fields in SETTING_DEFS:
@@ -576,7 +608,19 @@ def main():
     if not os.environ.get("WEB_PASSWORD"):
         print("警告: 未设置 WEB_PASSWORD 环境变量，Web 登录已锁定（所有页面需登录）")
     print(f"Web 管理端启动: http://{host}:{port}")
-    app.run(host=host, port=port)
+    try:
+        app.run(host=host, port=port)
+    except OSError as e:
+        # U13：端口占用时给中文指引
+        import errno
+        if e.errno in (errno.EADDRINUSE, 98, 48):
+            print(f"错误: 端口 {port} 已被占用。")
+            print("  解决办法（二选一）：")
+            print(f"  1. 换个端口：修改 config.yaml 里 web.port（当前 {port}）")
+            print("  2. 停掉占用该端口的进程后再启动")
+        else:
+            print(f"错误: Web 启动失败: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

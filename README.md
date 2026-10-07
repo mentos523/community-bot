@@ -27,6 +27,7 @@ python -m src.main
 
 # 5. 启动 Web 管理（另开一个终端）
 export WEB_PASSWORD="你的管理密码"   # 必设，否则 Web 锁定无法登录
+# export WEB_SECRET_KEY=$(openssl rand -hex 32)  # 会话密钥，可选；不设则每次启动随机生成（重启后需重新登录）
 python -m src.web.app
 ```
 
@@ -42,24 +43,34 @@ Web 管理界面：`http://localhost:52323`（默认只监听本机）
 ```yaml
 communities:
   - name: "技术交流"
-    platform: flarum
+    plugin: flarum          # 插件名（不是 platform）
+    enabled: true
     url: "https://example.com"
-    # ... 平台相关配置
+    # 认证走环境变量，如 FLARUM_TOKEN
 
 models:
   - name: "qwen2.5:7b"
-    type: local          # local | remote | openai | gemini | anthropic
+    type: local             # local | remote | openai | gemini | anthropic
     endpoint: "http://localhost:11434"
-  - name: "gpt-4o"
+  - name: "gpt-4o-mini"
     type: openai
     # api_key 通过环境变量 OPENAI_API_KEY 提供
 
+default_model: "qwen2.5:7b"
+# fallback_model: "gpt-4o-mini"   # 备用模型（可选）
+
 rules:
-  reply_threshold: ...   # 回复规则
-  tier_intervals: ...    # 梯度间隔
+  max_replies_per_day: 20   # 全站每天最多回复 20 条（可调）
+  max_replies_per_discussion_per_day: 2
+
+tiers:                      # 梯度轮询间隔（秒，可调）
+  hot_interval: 60          # 1小时内有活动
+  warm_interval: 1800       # 1-24小时
+  cold_interval: 604800     # 24小时-3天
 ```
 
-密钥类配置通过环境变量提供，不写入配置文件明文。
+完整配置说明见 [docs/CONFIG.md](docs/CONFIG.md)，
+配置模板见 `config/config.example.yaml`（注释详细，建议对照着改）。
 
 ## 模型管理
 

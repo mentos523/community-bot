@@ -1,4 +1,5 @@
 """入口：加载配置，初始化插件/模型，启动调度器。"""
+import argparse
 import logging
 import os
 import signal
@@ -115,22 +116,32 @@ def build_scheduler(config: dict, log: logging.Logger) -> Scheduler:
     return Scheduler(config, adapters, mm, STATE_PATH, log)
 
 
+def parse_args():
+    """U3：支持 --config 指定配置文件路径。"""
+    p = argparse.ArgumentParser(description="社区机器人守护进程")
+    p.add_argument("--config", default=CONFIG_PATH,
+                   help=f"配置文件路径（默认 {CONFIG_PATH}）")
+    return p.parse_args()
+
+
 def main():
+    args = parse_args()
+    config_path = os.path.abspath(args.config)
     log = setup_logging()
     log.info("=" * 50)
     log.info("社区机器人启动")
-    if not os.path.isfile(CONFIG_PATH):
-        log.error(f"配置文件不存在: {CONFIG_PATH}")
+    if not os.path.isfile(config_path):
+        log.error(f"配置文件不存在: {config_path}")
         log.error("请先执行: cp config/config.example.yaml config/config.yaml")
         sys.exit(1)
-    config = load_config(CONFIG_PATH)
+    config = load_config(config_path)
     try:
         sched = build_scheduler(config, log)
     except BuildError as e:
         # S5：sys.exit 只留给初始启动路径
         log.error(f"{e}，退出")
         sys.exit(1)
-    last_mtime = os.path.getmtime(CONFIG_PATH)
+    last_mtime = os.path.getmtime(config_path)
     config_missing_warned = False  # R2-N1：配置文件被删后只告警一次
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
@@ -138,17 +149,17 @@ def main():
     while not _stop_requested:
         try:
             try:
-                mtime = os.path.getmtime(CONFIG_PATH)
+                mtime = os.path.getmtime(config_path)
             except FileNotFoundError:
                 # R2-N1：配置文件被删除时不再每轮刷屏，只告警一次并停止热重载检查
                 if not config_missing_warned:
-                    log.error(f"配置文件不存在: {CONFIG_PATH}，停止热重载检查，继续用旧配置运行")
+                    log.error(f"配置文件不存在: {config_path}，停止热重载检查，继续用旧配置运行")
                     config_missing_warned = True
                 mtime = last_mtime
             if mtime != last_mtime:
                 log.info("检测到配置变更，热重载")
                 try:
-                    new_config = load_config(CONFIG_PATH)
+                    new_config = load_config(config_path)
                     new_sched = build_scheduler(new_config, log)
                 except Exception:
                     # S5：热重载失败保留旧调度器继续跑，不杀进程

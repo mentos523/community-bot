@@ -92,7 +92,14 @@ class Scheduler:
                 tmp = self.state_path + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(self.state, f, ensure_ascii=False, indent=2)
+                # U10：state.json 含 token/水位，新建时设 600 权限；已存在文件保持原权限
+                is_new = not os.path.exists(self.state_path)
                 os.replace(tmp, self.state_path)
+                if is_new:
+                    try:
+                        os.chmod(self.state_path, 0o600)
+                    except OSError:
+                        pass
                 self._dirty = False
             except Exception as e:
                 self.log.warning(f"保存状态失败: {e}")
@@ -396,7 +403,7 @@ class Scheduler:
         prompts_cfg = self.config.get("prompts") or {}
         text, reason = generate_reply(
             self.mm, model_name, content,
-            bot_name=comm.get("bot_name", "助教"),
+            bot_name=comm.get("bot_name"),  # U15：None 时由 generator 按优先级回退
             max_length=style.get("max_length", 0),
             options=self.mm.get_options(model_name),
             logger=self.log,
@@ -409,7 +416,7 @@ class Scheduler:
                 self.log.warning(f"[{name}] 主模型 {model_name} 失败，尝试备用模型 {fb}")
                 text, reason = generate_reply(
                     self.mm, fb, content,
-                    bot_name=comm.get("bot_name", "助教"),
+                    bot_name=comm.get("bot_name"),  # U15：None 时由 generator 按优先级回退
                     max_length=style.get("max_length", 0),
                     options=self.mm.get_options(fb),
                     logger=self.log,

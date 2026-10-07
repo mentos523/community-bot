@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}新增社区 - 社区机器人{% endblock %}
+{% block content %}
+<h2>新增社区</h2>
+<p class="hint">选一个平台插件，给社区起个名字，点"创建"后会跳到该社区的配置页继续填写插件参数。</p>
+
+<div class="card">
+<form method="post">
+  <div class="field">
+    <label>社区名称 <span style="color:red">*</span></label>
+    <input type="text" name="name" placeholder="如：技术交流" style="width:60%" required>
+    <div class="hint">自定义名称，在日志和界面里显示用，不能与已有社区重名。</div>
+  </div>
+  <div class="field">
+    <label>平台插件 <span style="color:red">*</span></label>
+    <select name="plugin" style="width:60%">
+      {% for m in manifests %}
+      <option value="{{ m._name }}">{{ m._name }} — {{ m.description }}（{{ m.platform_type }}）</option>
+      {% endfor %}
+    </select>
+    <div class="hint">决定这个社区用哪个平台的适配器。创建后不可更改（改了等于换平台）。</div>
+  </div>
+  <button type="submit">创建并去配置</button>
+  <a href="/plugins"><button type="button">返回</button></a>
+</form>
+</div>
+{% endblock %}

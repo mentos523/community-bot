@@ -3,6 +3,7 @@
 {% block content %}
 <h2>插件管理</h2>
 <p class="hint">每个社区独立选用一个插件。此处修改直接写入 config.yaml 的 <code>communities</code> 段，与守护进程同源，保存后热重载生效。</p>
+<p><a href="/plugins/add"><button type="button">＋ 新增社区</button></a></p>
 <div class="card">
 {% if items %}
 <table>
@@ -34,14 +35,14 @@
   {% endfor %}
 </table>
 {% else %}
-<p class="hint">暂无社区配置。请在 config/config.yaml 的 <code>communities</code> 段添加社区（参考 config.example.yaml）。</p>
+<p class="hint">暂无社区配置。点上方"＋ 新增社区"按钮添加第一个社区。</p>
 {% endif %}
 </div>
 
 {% if unused %}
 <div class="card">
   <h3>尚未使用的插件</h3>
-  <p class="hint">以下插件已安装但未被任何社区使用。如需启用，在 config.yaml 的 <code>communities</code> 里新增一条（plugin 填对应名称）。</p>
+  <p class="hint">以下插件已安装但未被任何社区使用。点上方"＋ 新增社区"按钮，选对应插件即可启用。</p>
   <table>
     <tr><th>插件</th><th>说明</th><th>版本</th><th>类型</th></tr>
     {% for p in unused %}

@@ -58,6 +58,17 @@ def set_community_values(cfg: dict, name: str, values: dict) -> bool:
     return True
 
 
+def add_community(cfg: dict, name: str, plugin: str) -> bool:
+    """新增社区条目。名称已存在时返回 False。"""
+    if find_community(cfg, name) is not None:
+        return False
+    comms = cfg.setdefault("communities", [])
+    if not isinstance(comms, list):
+        cfg["communities"] = comms = []
+    comms.append({"name": name, "plugin": plugin, "enabled": True})
+    return True
+
+
 def effective_value(cfg_value, env_var: str):
     """配置值优先，其次环境变量。返回 (值, 来源)。"""
     if cfg_value not in (None, ""):
