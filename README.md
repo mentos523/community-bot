@@ -4,7 +4,7 @@
 
 ## 功能
 
-- **多平台适配**：Flarum、Discourse、Telegram、Discord（按需扩展）
+- **多平台适配**：论坛类（Flarum、Discourse、phpBB、NodeBB、Discuz!）+ 即时通讯类（Telegram、Discord、飞书、钉钉、企业微信、Slack），详见 [docs/ADAPTERS.md](docs/ADAPTERS.md)
 - **自由模型层**：本地 Ollama、远端自建、商业 API（OpenAI、Google Gemini、Anthropic）
 - **Web 管理**：仪表盘、规则配置、模型管理、日志查看
 - **梯度轮询**：按帖子活跃度分级检查（Hot/Warm/Cold/Archived），不刷浏览量
