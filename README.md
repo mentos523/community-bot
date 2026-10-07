@@ -58,6 +58,10 @@ Web 界面支持：
 - **手动添加**：远端/商业模型填地址和密钥
 - **测试**：每个模型可发测试 prompt，看延迟和质量
 
+## 本地模型
+
+推荐优先用本地模型（免费、无限量），详见 [docs/LOCAL_MODELS.md](docs/LOCAL_MODELS.md)。
+
 ## 插件
 
 平台适配器以插件形式载入，详见 [docs/PLUGINS.md](docs/PLUGINS.md)。
