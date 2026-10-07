@@ -51,8 +51,22 @@ def setup_logging() -> logging.Logger:
 
 
 def load_config(path: str) -> dict:
-    with open(path, encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        # 小白友好：YAML 语法错误转中文提示
+        mark = getattr(e, "problem_mark", None)
+        line_info = f"第 {mark.line + 1} 行附近" if mark else "文件某处"
+        raise ValueError(
+            f"配置文件写错了（{line_info}有 YAML 语法问题）\n"
+            f"  常见原因（三大忌）：\n"
+            f"  ① 冒号后面要加空格：写 port: 52323，不要写 port:52323\n"
+            f"  ② 不要用 Tab 缩进，只用空格\n"
+            f"  ③ 不要用中文冒号：用 : 不要用 ：\n"
+            f"  也可以把文件内容粘贴到 https://www.yamllint.com 在线检查\n"
+            f"  原始错误：{e}"
+        )
     if not isinstance(cfg, dict):
         raise ValueError(f"配置文件顶层必须是字典，实际是 {type(cfg).__name__}: {path}")
     return cfg
@@ -137,7 +151,12 @@ def main():
         log.error(f"配置文件不存在: {config_path}")
         log.error("请先执行: cp config/config.example.yaml config/config.yaml")
         sys.exit(1)
-    config = load_config(config_path)
+    try:
+        config = load_config(config_path)
+    except ValueError as e:
+        # 小白友好：配置文件写错时给中文提示而不是 traceback
+        print(f"\n{e}\n", file=sys.stderr)
+        sys.exit(1)
     try:
         sched = build_scheduler(config, log)
     except BuildError as e:

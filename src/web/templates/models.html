@@ -32,10 +32,11 @@
 </div>
 
 <div class="card">
-  <h3>扫描本地模型</h3>
+  <h3>查找已下载的模型</h3>
   <form method="post" action="/models">
     <input type="hidden" name="action" value="scan">
-    <button type="submit">扫描 Ollama</button>
+    <button type="submit">查找已下载的模型</button>
+    <div class="hint">点一下，自动找出你电脑里已下载的 Ollama 模型（要先装好 Ollama 并下载模型，见文档）。</div>
   </form>
   {% if scanned is not none %}
     {% if scanned %}

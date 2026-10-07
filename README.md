@@ -1,5 +1,32 @@
 # 社区机器人 (Community Bot)
 
+> **一句话介绍**：这是一个自动帮你回复论坛帖子 / 群消息的机器人。
+> 你告诉它去哪个论坛或群、用什么"大脑"（AI 模型），它就会 24 小时帮你回帖。
+
+## 开始之前（先看这 3 条）
+
+**你需要**：
+- ⬜ 一台电脑（Windows / Mac / Linux 都行，最好能长期开机）
+- ⬜ 一个论坛或聊天平台的**管理员 / Bot 权限**（比如论坛 API Token、Telegram Bot Token——没有这个机器人连不上你的社区）
+- ⬜ 会复制粘贴命令（跟着 [安装指南](docs/安装指南.md) 一步步来就行）
+
+**⚠️ 不适合你**：如果你只是普通群成员（没有管理员权限）、或者看到黑窗口就头疼，
+可以先找个懂技术的朋友帮忙装。装好之后日常使用全在网页上点，不用再碰命令行。
+
+不会装？直接看 [docs/安装指南.md](docs/安装指南.md)，从"安装 Python"开始手把手教你。
+
+## 界面预览
+
+| 总览 | 社区管理 |
+|------|---------|
+| ![总览](docs/screenshots/01-dashboard.png) | ![社区管理](docs/screenshots/02-plugins.png) |
+
+| 模型管理 | 全局设置 |
+|---------|---------|
+| ![模型管理](docs/screenshots/03-models.png) | ![全局设置](docs/screenshots/04-settings.png) |
+
+---
+
 一个可配置的多平台社区助教机器人。支持多种社区平台、多种模型后端，带 Web 可视化管理。
 
 ## 功能
@@ -71,6 +98,17 @@ tiers:                      # 梯度轮询间隔（秒，可调）
 
 完整配置说明见 [docs/CONFIG.md](docs/CONFIG.md)，
 配置模板见 `config/config.example.yaml`（注释详细，建议对照着改）。
+
+## 文档
+
+| 文档 | 给谁看的 |
+|------|---------|
+| [docs/安装指南.md](docs/安装指南.md) | 第一次用命令行：分 Windows / Mac / Linux，手把手从装 Python 开始 |
+| [docs/FAQ.md](docs/FAQ.md) | 遇到问题先来这查：按"我想…/我遇到了…"找答案 |
+| [docs/术语表.md](docs/术语表.md) | 看到不认识的词（守护进程、热重载…）来这查，一句话讲明白 |
+| [docs/CONFIG.md](docs/CONFIG.md) | 配置说明：小白先看开头的"小白主路径" |
+| [docs/LOCAL_MODELS.md](docs/LOCAL_MODELS.md) | 本地模型（Ollama）安装和配置 |
+| [docs/PLUGINS.md](docs/PLUGINS.md) | 插件开发和配置 |
 
 ## 模型管理
 

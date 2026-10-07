@@ -4,14 +4,30 @@
 
 ## 1. 安装 Ollama
 
-```bash
-# Linux
-curl -fsSL https://ollama.com/install.sh | sh
+Ollama 是一个免费软件，让你在自己电脑上运行 AI 模型（机器人的"大脑"），不用联网、不用花钱。
 
-# macOS / Windows：去 https://ollama.com/download 下载安装包
+**Linux**（复制下面这行到终端，回车）：
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
 ```
 
-启动服务（Linux 安装后自动启动）：
+> 🔒 安全说明：这是 Ollama 官方提供的一键安装脚本，作用是下载 Ollama 并安装到你的电脑。
+> 不放心的话可以去 https://ollama.com/download 手动下载安装包，效果一样。
+
+**Windows / macOS**（三步式）：
+
+1. 打开 https://ollama.com/download
+2. 点对应系统的 **Download** 按钮下载安装包
+3. 双击安装包，一路"下一步" / 拖到"应用程序"文件夹
+
+装完验证：打开终端（Windows 叫"命令提示符"），输入下面这行，看到版本号就是成功了：
+
+```
+ollama --version
+```
+
+启动服务（Linux 安装后一般自动启动；Windows/Mac 装完也是自动在后台运行）：
 
 ```bash
 ollama serve          # 默认监听 http://localhost:11434
@@ -20,14 +36,18 @@ ollama serve          # 默认监听 http://localhost:11434
 ## 2. 下载模型
 
 ```bash
-# 推荐（中文好、速度快、7B 参数，普通 CPU 可跑）
 ollama pull qwen2.5:7b
-
-# 其他可选
-ollama pull qwen2.5:14b     # 效果更好，需要更大内存
-ollama pull llama3.1:8b     # 英文强
-ollama pull gemma2:9b       # Google 系
 ```
+
+> ⚠️ 下载预警：这一步要下载约 **4.7GB**，请预留至少 10GB 磁盘空间；
+> 按网速可能要 10-30 分钟，下载完之前不要关机、断网。
+> 中途按 Ctrl+C 中断后可以重新运行，会接着下，不会从头开始。
+
+- 推荐 `qwen2.5:7b`：中文好、速度快，7B 参数（模型大小，数字越大越聪明也越吃内存），普通 CPU 能跑
+- 其他可选：
+  - `qwen2.5:14b`：效果更好，需要更大内存（16GB+）
+  - `llama3.1:8b`：英文强
+  - `gemma2:9b`：Google 系
 
 查看已下载的模型：
 
@@ -70,7 +90,8 @@ default_model: "qwen2.5:7b"
 
 ## 5. 冷启动说明
 
-Ollama 为省内存，模型闲置一段时间后会自动卸载。下次调用时需重新加载（冷启动），7B 模型在 CPU 机器上可能慢几十秒。
+Ollama 为省内存，模型闲置一段时间后会自动卸载。下次调用时需重新加载，
+这叫"冷启动"（就像汽车冷车启动要预热一样），7B 模型在 CPU 机器上可能慢几十秒。
 
 - 社区机器人是 7×24 运行的，建议 `keep_alive` 设为 `"24h"` 让模型常驻内存，避免每次都要冷启动
 - 即使冷启动，机器人也有熔断保护：模型连续失败会自动熔断几分钟，不会卡死轮询

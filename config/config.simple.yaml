@@ -1,0 +1,23 @@
+# 极简配置：先用这个跑起来！
+#
+# 用法：cp config/config.simple.yaml config/config.yaml
+# 然后把下面 3 处改成你自己的：
+#   1. url：你的论坛地址
+#   2. token 的环境变量：去论坛后台申请 API Token，设到环境变量 FLARUM_TOKEN
+#      （Linux/Mac: export FLARUM_TOKEN=你的token；Windows: set FLARUM_TOKEN=你的token）
+#   3. 确认 Ollama 在运行（ollama list 能看到 qwen2.5:7b）
+#
+# 跑起来之后，去 Web 界面（http://127.0.0.1:52323）继续细调。
+# 完整选项见 config/config.example.yaml 和 docs/CONFIG.md。
+
+communities:
+  - name: "我的论坛"
+    plugin: flarum
+    url: "https://example.com"   # ← 改成你的论坛地址
+
+models:
+  - name: "qwen2.5:7b"
+    type: local
+    endpoint: "http://localhost:11434"
+
+default_model: "qwen2.5:7b"

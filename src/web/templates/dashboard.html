@@ -1,7 +1,8 @@
 {% extends "base.html" %}
-{% block title %}仪表盘 - 社区机器人{% endblock %}
+{% block title %}总览 - 社区机器人{% endblock %}
 {% block content %}
-<h2>仪表盘</h2>
+<h2>总览</h2>
+<p class="hint">这里能看到机器人正在管哪些社区、今天回了多少条消息。</p>
 
 <div class="card">
   <h3>社区</h3>
@@ -24,7 +25,7 @@
     {% endfor %}
   </table>
   {% else %}
-  <p class="hint">暂无社区配置，去 <a href="/plugins">插件管理</a> 配置。</p>
+  <p class="hint">暂无社区配置，去 <a href="/plugins">社区管理</a> 添加。</p>
   {% endif %}
 </div>
 
