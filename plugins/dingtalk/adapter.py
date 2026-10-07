@@ -21,7 +21,8 @@ import urllib.request
 import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
+from src.core.resilience import ResilienceMixin
 
 TEXT_LIMIT = 20000
 
@@ -29,6 +30,11 @@ TEXT_LIMIT = 20000
 def _chunks(text, limit):
     """超长文本按 limit 切片，分多条发送而非截断丢字（M8）。"""
     return [text[i:i + limit] for i in range(0, len(text), limit)]
+
+
+class _RateLimited(Exception):
+    """H-M3：内部限流信号。"""
+    pass
 
 
 def _http_post(url, body, timeout=30):
@@ -42,6 +48,11 @@ def _http_post(url, body, timeout=30):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        # R-M3：401/403 抛 AuthError；H-M3：429 转内部限流信号
+        if e.code in (401, 403):
+            raise AuthError("钉钉认证失效（401/403）")
+        if e.code == 429:
+            raise _RateLimited()
         try:
             return e.code, json.loads(e.read().decode("utf-8"))
         except Exception:
@@ -50,8 +61,9 @@ def _http_post(url, body, timeout=30):
         return 0, {}
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     def __init__(self, config):
+        self._init_resilience()
         super().__init__(config)
         self.webhook = self._resolve("webhook_url", "DINGTALK_WEBHOOK")
         self.secret = self._resolve("secret", "DINGTALK_SECRET")
@@ -89,15 +101,29 @@ class Adapter(PlatformAdapter):
 
     def reply(self, conversation_id: str, content: str) -> bool:
         # 一个 webhook 对应一个群，conversation_id 仅作标识，不参与寻址
+        # H-M3/F-M1：限流退避或失败退避期内直接返回 False
+        if self._in_backoff() or self._rate_limited():
+            return False
         if not content or not content.strip():
             return False
-        # 超长内容分多条发送（M8），原先 content[:20000] 直接截断会丢字
-        for chunk in _chunks(content, TEXT_LIMIT):
-            body = {"msgtype": "text", "text": {"content": chunk}}
-            _, data = _http_post(self._signed_url(), body)
-            if data.get("errcode") != 0:
-                return False
-        return True
+        try:
+            # 超长内容分多条发送（M8），原先 content[:20000] 直接截断会丢字
+            for chunk in _chunks(content, TEXT_LIMIT):
+                body = {"msgtype": "text", "text": {"content": chunk}}
+                _, data = _http_post(self._signed_url(), body)
+                if data.get("errcode") != 0:
+                    self._note_failure()
+                    return False
+            self._note_success()
+            return True
+        except _RateLimited:
+            self._mark_rate_limited()
+            return False
+        except AuthError:
+            raise
+        except Exception:
+            self._note_failure()
+            return False
 
     def get_info(self) -> dict:
         return {"platform": "dingtalk", "mode": "webhook-send-only"}

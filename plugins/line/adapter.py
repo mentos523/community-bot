@@ -7,14 +7,16 @@ reply 策略：ingest_webhook 时记录 conversation_id -> replyToken 映射；
 reply(conversation_id, content) 按基类签名调用，内部查最新有效
 （10 分钟内）的 replyToken，有则走 /message/reply，过期/无则降级走 /message/push。
 """
-import sys, os, json, time, hmac, hashlib, base64, urllib.request
+import sys, os, json, time, hmac, hashlib, base64, urllib.request, urllib.error
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
+from src.core.resilience import ResilienceMixin
 
 TIMEOUT = 20
 API_BASE = "https://api.line.me/v2/bot"
 TEXT_LIMIT = 5000  # LINE 单条文本消息上限 5000 字符
 REPLY_TOKEN_TTL = 600  # replyToken 有效期约 10 分钟，过期自动清理
+BUFFER_MAX = 1000  # H-M2：Webhook 缓冲上限，超了丢弃最旧
 
 
 def _chunks(text, limit):
@@ -22,13 +24,15 @@ def _chunks(text, limit):
     return [text[i:i + limit] for i in range(0, len(text), limit)]
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     def __init__(self, config: dict):
+        self._init_resilience()
         # message_id -> (replyToken, 到达时间戳)，已用 token 成功回复后删除
         self._reply_tokens: dict[str, tuple[str, float]] = {}
         # conversation_id -> (message_id, replyToken, 到达时间戳)，reply() 时查用
         self._conv_tokens: dict[str, tuple[str, str, float]] = {}
         self._buffer: list[Message] = []
+        self._buffer_ids: set[str] = set()  # H-M2：按消息 ID 去重
         super().__init__(config)
 
     def _cfg(self, key, env_var, default=""):
@@ -56,7 +60,11 @@ class Adapter(PlatformAdapter):
                 store.pop(k, None)
 
     def ingest_webhook(self, payload: dict):
-        """Web 层收到 LINE Webhook 后调用，把文本消息写入缓冲。"""
+        """Web 层收到 LINE Webhook 后调用，把文本消息写入缓冲。
+
+        H-M2：按消息 ID 去重（防 Webhook 重复推送）；缓冲上限 BUFFER_MAX，
+        超了丢弃最旧，保证长期运行内存有界。
+        """
         self._purge_tokens()
         now = time.time()
         for ev in payload.get("events", []):
@@ -68,6 +76,8 @@ class Adapter(PlatformAdapter):
             src = ev.get("source", {})
             conv_id = str(src.get("groupId") or src.get("roomId") or src.get("userId") or "")
             mid = str(msg.get("id", ""))
+            if not mid or mid in self._buffer_ids:
+                continue  # H-M2：去重
             reply_token = ev.get("replyToken", "")
             if reply_token and mid:
                 self._reply_tokens[mid] = (reply_token, now)
@@ -83,23 +93,46 @@ class Adapter(PlatformAdapter):
                 created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts / 1000)) if ts else "",
                 raw=ev,
             ))
+            self._buffer_ids.add(mid)
+            # H-M2：缓冲上限，超了丢弃最旧
+            while len(self._buffer) > BUFFER_MAX:
+                old = self._buffer.pop(0)
+                self._buffer_ids.discard(old.id)
 
     def fetch_updates(self) -> list[Message]:
         """取出 Webhook 缓冲中的新消息。"""
-        msgs, self._buffer = self._buffer, []
-        return msgs
+        # F-M1：退避期内直接返回（缓冲保留，下轮再取）
+        if self._in_backoff() or self._rate_limited():
+            return []
+        try:
+            msgs, self._buffer = self._buffer, []
+            self._buffer_ids.clear()
+            self._note_success()
+            return msgs
+        except Exception:
+            self._note_failure()
+            return []
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:
         # 聊天类无需详情
         return []
 
     def _post(self, url: str, payload: dict) -> bool:
-        """单次 POST，messages 数组按 LINE 限制每批最多 5 条。"""
+        """单次 POST，messages 数组按 LINE 限制每批最多 5 条。
+
+        R-M3/H-M3：401/403 抛 AuthError；429 标记非阻塞退避后返回 False。
+        """
         try:
             req = urllib.request.Request(
                 url, data=json.dumps(payload).encode("utf-8"), headers=self._headers())
             with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
                 return r.status == 200
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("LINE 认证失效（401/403）")
+            if e.code == 429:
+                self._mark_rate_limited()
+            return False
         except Exception:
             return False
 

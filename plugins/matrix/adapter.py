@@ -1,7 +1,8 @@
 """Matrix 适配器"""
-import sys, os, json, time, random, urllib.request, urllib.parse
+import sys, os, json, time, random, urllib.request, urllib.parse, urllib.error
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
+from src.core.resilience import ResilienceMixin
 
 TIMEOUT = 20
 SYNC_TIMEOUT = 10  # sync 长轮询秒数（M4：从 20s 降到 10s，减少调度阻塞）
@@ -42,14 +43,17 @@ def _safe_ts_ms(v) -> float:
         return 0.0
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     def __init__(self, config: dict):
+        self._init_resilience()
         # sync 游标，重启后从文件恢复（M3），避免重复处理历史事件
         self._since: str | None = _load_since()
         super().__init__(config)
 
     def _cfg(self, key, env_var, default=""):
-        return self.config.get(key) or os.environ.get(env_var, default)
+        # R-N1：加 strip，与其他插件行为一致
+        v = self.config.get(key) or os.environ.get(env_var, default)
+        return str(v).strip() if v is not None else ""
 
     def _api(self, method: str, path: str, payload: dict | None = None, params: dict | None = None):
         base = self._cfg("homeserver", "MATRIX_HOMESERVER").rstrip("/")
@@ -60,17 +64,37 @@ class Adapter(PlatformAdapter):
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return json.load(r)
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            # R-M3：401/403 抛 AuthError，由调度器统一处理
+            if e.code in (401, 403):
+                raise AuthError("Matrix 认证失效（401/403）")
+            # H-M3：429 限流标记非阻塞退避
+            if e.code == 429:
+                retry_after = 0
+                try:
+                    retry_after = int(e.headers.get("Retry-After", 0) or 0)
+                except Exception:
+                    pass
+                self._mark_rate_limited(retry_after)
+            raise
 
     def fetch_updates(self) -> list[Message]:
         """sync 长轮询拉取新事件。"""
+        # F-M1/H-M3：退避期内直接返回
+        if self._in_backoff() or self._rate_limited():
+            return []
         try:
             params = {"timeout": str(SYNC_TIMEOUT * 1000)}
             if self._since:
                 params["since"] = self._since
             data = self._api("GET", "/_matrix/client/v3/sync", params=params)
+        except AuthError:
+            raise
         except Exception:
+            self._note_failure()
             return []
         self._since = data.get("next_batch", self._since)
         _save_since(self._since)  # 游标落盘，重启不丢（M3）
@@ -97,6 +121,7 @@ class Adapter(PlatformAdapter):
                     created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts_ms / 1000)) if ts_ms else "",
                     raw=ev,
                 ))
+        self._note_success()
         return msgs
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:

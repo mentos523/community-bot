@@ -11,6 +11,8 @@
 import sys
 import os
 import json
+import html as _html
+import re
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -18,8 +20,19 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from src.core.base import PlatformAdapter, Message, AuthError
+from src.core.resilience import ResilienceMixin
 
 REQUEST_TIMEOUT = 20
+
+
+def _strip_html(s):
+    """R-M1：去掉 HTML 标签，转义字符还原（参考 flarum 实现）。"""
+    if not s:
+        return ""
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
+    s = re.sub(r"</p\s*>", "\n", s, flags=re.I)
+    s = re.sub(r"<[^>]+>", "", s)
+    return _html.unescape(s).strip()
 
 
 def _to_iso(ts):
@@ -32,8 +45,9 @@ def _to_iso(ts):
         return str(ts)
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     def __init__(self, config: dict):
+        self._init_resilience()
         super().__init__(config)
         self.base_url = (config.get("url") or "").rstrip("/")
         # 密码优先从环境变量读取；登录成功后缓存 auth，后续请求不再明文传密码
@@ -110,27 +124,34 @@ class Adapter(PlatformAdapter):
 
     def fetch_updates(self) -> list[Message]:
         """轻量拉取主题列表（不进帖子详情）"""
-        params = {"module": "topiclist"}
-        if self.fid:
-            params["fid"] = self.fid
-        data = self._api_get(params)
-        if not data:
+        if self._in_backoff() or self._rate_limited():
             return []
-        msgs = []
-        for t in data.get("forum_threadlist", []) or []:
-            msgs.append(Message(
-                id=str(t.get("tid", "")),
-                platform="discuz",
-                conversation_id=str(t.get("tid", "")),
-                conversation_title=t.get("subject", ""),
-                author_id=str(t.get("authorid", "")),
-                author_name=t.get("author", ""),
-                content=t.get("subject", ""),
-                # M7 修复：用最后回复时间（dblastpost）做水位，转 ISO
-                created_at=_to_iso(t.get("dblastpost") or t.get("dbdateline", "")),
-                raw=t,
-            ))
-        return msgs
+        try:
+            params = {"module": "topiclist"}
+            if self.fid:
+                params["fid"] = self.fid
+            data = self._api_get(params)
+            if not data:
+                return []
+            msgs = []
+            for t in data.get("forum_threadlist", []) or []:
+                msgs.append(Message(
+                    id=str(t.get("tid", "")),
+                    platform="discuz",
+                    conversation_id=str(t.get("tid", "")),
+                    conversation_title=t.get("subject", ""),
+                    author_id=str(t.get("authorid", "")),
+                    author_name=t.get("author", ""),
+                    content=t.get("subject", ""),
+                    # M7 修复：用最后回复时间（dblastpost）做水位，转 ISO
+                    created_at=_to_iso(t.get("dblastpost") or t.get("dbdateline", "")),
+                    raw=t,
+                ))
+            self._note_success()
+            return msgs
+        except Exception:
+            self._note_failure()
+            return []
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:
         """拉取主题下的帖子列表"""
@@ -147,7 +168,8 @@ class Adapter(PlatformAdapter):
                 conversation_title=thread.get("subject", ""),
                 author_id=str(p.get("authorid", "")),
                 author_name=p.get("author", ""),
-                content=p.get("message", ""),
+                # R-M1：帖子内容去 HTML 标签
+                content=_strip_html(p.get("message", "")),
                 created_at=_to_iso(p.get("dbdateline", "")),
                 raw=p,
             ))

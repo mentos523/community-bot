@@ -18,11 +18,13 @@ import urllib.error
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
+from src.core.resilience import ResilienceMixin
 
 AUTH_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 API = "https://open.feishu.cn/open-apis"
 TEXT_LIMIT = 10000
+MESSAGES_MAX_PAGES = 5  # R-S1：单群消息翻页上限，防无限循环
 
 
 def _http(method, url, headers=None, body=None, timeout=30):
@@ -35,6 +37,9 @@ def _http(method, url, headers=None, body=None, timeout=30):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        # R-M3：401/403 直接抛 AuthError，由调度器统一处理
+        if e.code in (401, 403):
+            raise AuthError("飞书认证失效（401/403）")
         try:
             return e.code, json.loads(e.read().decode("utf-8"))
         except Exception:
@@ -79,8 +84,9 @@ def _save_json(path: str, obj) -> None:
         pass
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     def __init__(self, config):
+        self._init_resilience()
         super().__init__(config)
         self.app_id = self._resolve("app_id", "FEISHU_APP_ID")
         self.app_secret = self._resolve("app_secret", "FEISHU_APP_SECRET")
@@ -139,55 +145,89 @@ class Adapter(PlatformAdapter):
             return ""
 
     def fetch_updates(self) -> list[Message]:
-        if not self._tenant_token():
+        # F-M1/H-M3：退避期内直接返回
+        if self._in_backoff() or self._rate_limited():
             return []
-        bot_id = self._bot_open_id()
+        try:
+            if not self._tenant_token():
+                self._note_failure()
+                return []
+            bot_id = self._bot_open_id()
+        except AuthError:
+            raise
+        except Exception:
+            self._note_failure()
+            return []
         msgs = []
-        for cid in self.chats:
-            params = {
-                "container_id_type": "chat",
-                "container_id": cid,
-                "sort_type": "ByCreateTimeDesc",
-                "page_size": 20,
-            }
-            url = f"{API}/im/v1/messages?" + urllib.parse.urlencode(params)
-            _, data = _http("GET", url, self._headers())
-            if data.get("code") != 0:
-                continue
-            items = (data.get("data") or {}).get("items", [])
-            if not items:
-                continue
-            # 时间解析防崩溃（M5）：畸形 create_time 视为 0，后续被水位过滤跳过
-            max_t = max((_safe_int(i.get("create_time")) for i in items), default=0)
-            if cid not in self._last_time:
+        try:
+            for cid in self.chats:
+                # R-S1：分页拉取全量消息（page_token 翻页，上限 MESSAGES_MAX_PAGES 页），
+                # 避免只取第一页导致水位推进后中间页消息永久丢失
+                items = []
+                page_token = ""
+                for _ in range(MESSAGES_MAX_PAGES):
+                    params = {
+                        "container_id_type": "chat",
+                        "container_id": cid,
+                        "sort_type": "ByCreateTimeDesc",
+                        "page_size": 20,
+                    }
+                    if page_token:
+                        params["page_token"] = page_token
+                    url = f"{API}/im/v1/messages?" + urllib.parse.urlencode(params)
+                    code, data = _http("GET", url, self._headers())
+                    if code == 429:
+                        # H-M3：飞书 429 限流，标记非阻塞退避，本轮跳过该群
+                        self._mark_rate_limited()
+                        break
+                    if data.get("code") != 0:
+                        break
+                    d = data.get("data") or {}
+                    items.extend(d.get("items", []))
+                    if not d.get("has_more"):
+                        break
+                    page_token = d.get("page_token", "")
+                    if not page_token:
+                        break
+                if not items:
+                    continue
+                # 时间解析防崩溃（M5）：畸形 create_time 视为 0，后续被水位过滤跳过
+                max_t = max((_safe_int(i.get("create_time")) for i in items), default=0)
+                if cid not in self._last_time:
+                    self._last_time[cid] = max_t
+                    _save_json(_data_file("feishu_last_time.json"), self._last_time)
+                    continue  # 首轮只记水位，不回历史
+                water = self._last_time.get(cid, 0)
+                for i in sorted(items, key=lambda x: _safe_int(x.get("create_time"))):
+                    ct = _safe_int(i.get("create_time"))
+                    if ct <= 0 or ct <= water:
+                        continue
+                    sender = i.get("sender") or {}
+                    if bot_id and sender.get("id") == bot_id:
+                        continue  # 跳过自己发的消息
+                    text = self._extract_text(i)
+                    if not text.strip():
+                        continue
+                    msgs.append(Message(
+                        id=i.get("message_id", ""),
+                        platform="feishu",
+                        conversation_id=cid,
+                        conversation_title="",
+                        author_id=sender.get("id", ""),
+                        author_name="",
+                        content=text,
+                        created_at=datetime.fromtimestamp(ct / 1000, tz=timezone.utc).isoformat() if ct else "",
+                        raw=i,
+                    ))
                 self._last_time[cid] = max_t
-                _save_json(_data_file("feishu_last_time.json"), self._last_time)
-                continue  # 首轮只记水位，不回历史
-            water = self._last_time.get(cid, 0)
-            for i in sorted(items, key=lambda x: _safe_int(x.get("create_time"))):
-                ct = _safe_int(i.get("create_time"))
-                if ct <= 0 or ct <= water:
-                    continue
-                sender = i.get("sender") or {}
-                if bot_id and sender.get("id") == bot_id:
-                    continue  # 跳过自己发的消息
-                text = self._extract_text(i)
-                if not text.strip():
-                    continue
-                msgs.append(Message(
-                    id=i.get("message_id", ""),
-                    platform="feishu",
-                    conversation_id=cid,
-                    conversation_title="",
-                    author_id=sender.get("id", ""),
-                    author_name="",
-                    content=text,
-                    created_at=datetime.fromtimestamp(ct / 1000, tz=timezone.utc).isoformat() if ct else "",
-                    raw=i,
-                ))
-            self._last_time[cid] = max_t
-        _save_json(_data_file("feishu_last_time.json"), self._last_time)
-        return msgs
+            _save_json(_data_file("feishu_last_time.json"), self._last_time)
+            self._note_success()
+            return msgs
+        except AuthError:
+            raise
+        except Exception:
+            self._note_failure()
+            return []
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:
         # IM 类：消息即详情，无需二次拉取

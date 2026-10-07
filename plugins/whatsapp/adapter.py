@@ -1,11 +1,13 @@
 """WhatsApp Cloud API 适配器（Meta）"""
-import sys, os, json, hmac, hashlib, urllib.request
+import sys, os, json, hmac, hashlib, time, urllib.request, urllib.error
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
+from src.core.resilience import ResilienceMixin
 
 TIMEOUT = 20
 GRAPH_BASE = "https://graph.facebook.com"
 TEXT_LIMIT = 4096  # WhatsApp 文本消息上限
+BUFFER_MAX = 1000  # H-M2：Webhook 缓冲上限，超了丢弃最旧
 
 
 def _chunks(text, limit):
@@ -13,11 +15,13 @@ def _chunks(text, limit):
     return [text[i:i + limit] for i in range(0, len(text), limit)]
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     """收消息走 Webhook（由 Web 层调用 ingest_webhook 写入缓冲），发消息走 Cloud API。"""
 
     def __init__(self, config: dict):
+        self._init_resilience()
         self._buffer: list[Message] = []
+        self._buffer_ids: set[str] = set()  # H-M2：按消息 ID 去重
         super().__init__(config)
 
     def _cfg(self, key, env_var, default=""):
@@ -33,8 +37,17 @@ class Adapter(PlatformAdapter):
         }
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return json.load(r)
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            # R-M3：401/403 抛 AuthError，由调度器统一处理
+            if e.code in (401, 403):
+                raise AuthError("WhatsApp 认证失效（401/403）")
+            # H-M3：429 限流标记非阻塞退避
+            if e.code == 429:
+                self._mark_rate_limited()
+            raise
 
     def verify_signature(self, body: bytes, signature: str) -> bool:
         """校验 Meta Webhook 签名（X-Hub-Signature-256: sha256=<hex>）。
@@ -64,8 +77,11 @@ class Adapter(PlatformAdapter):
                 for msg in value.get("messages", []):
                     if msg.get("type") != "text":
                         continue
+                    mid = str(msg.get("id", ""))
+                    if not mid or mid in self._buffer_ids:
+                        continue  # H-M2：按消息 ID 去重
                     self._buffer.append(Message(
-                        id=str(msg.get("id", "")),
+                        id=mid,
                         platform="whatsapp",
                         conversation_id=str(msg.get("from", "")),
                         author_id=str(msg.get("from", "")),
@@ -73,12 +89,26 @@ class Adapter(PlatformAdapter):
                         created_at=str(msg.get("timestamp", "")),
                         raw=msg,
                     ))
+                    self._buffer_ids.add(mid)
+                    # H-M2：缓冲上限，超了丢弃最旧
+                    while len(self._buffer) > BUFFER_MAX:
+                        old = self._buffer.pop(0)
+                        self._buffer_ids.discard(old.id)
         return True
 
     def fetch_updates(self) -> list[Message]:
         """取出 Webhook 缓冲中的新消息。"""
-        msgs, self._buffer = self._buffer, []
-        return msgs
+        # F-M1：退避期内直接返回（缓冲保留，下轮再取）
+        if self._in_backoff() or self._rate_limited():
+            return []
+        try:
+            msgs, self._buffer = self._buffer, []
+            self._buffer_ids.clear()
+            self._note_success()
+            return msgs
+        except Exception:
+            self._note_failure()
+            return []
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:
         # 聊天类无需详情

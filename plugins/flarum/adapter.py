@@ -17,6 +17,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from src.core.base import Message, PlatformAdapter, AuthError
+from src.core.resilience import ResilienceMixin
 
 TIMEOUT = 20
 
@@ -35,10 +36,11 @@ def _strip_html(s):
     return _html.unescape(s).strip()
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     """Flarum 平台适配器"""
 
     def __init__(self, config):
+        self._init_resilience()
         super().__init__(config)
         self.base = _conf(config, "url").rstrip("/")
         self._token = _conf(config, "token", "FLARUM_TOKEN")
@@ -92,31 +94,38 @@ class Adapter(PlatformAdapter):
 
     def fetch_updates(self):
         """轻量拉取讨论列表（不进详情，不刷浏览量）"""
-        if not self.base:
+        if self._in_backoff() or self._rate_limited():
             return []
-        path = "/api/discussions?sort=-lastPostedAt&page[limit]=15"
-        if self._tag:
-            path += "&filter[tag]=" + urllib.parse.quote(self._tag)
-        code, data = self._request("GET", path)
-        if code != 200 or not data:
-            return []
-        out = []
-        for d in data.get("data", []):
-            a = d.get("attributes", {}) or {}
-            out.append(
-                Message(
-                    id=str(d.get("id")),
-                    platform="flarum",
-                    conversation_id=str(d.get("id")),
-                    conversation_title=a.get("title", ""),
-                    created_at=a.get("lastPostedAt", "") or a.get("createdAt", ""),
-                    raw={
-                        "lastPostNumber": a.get("lastPostNumber", 0),
-                        "commentCount": a.get("commentCount", 0),
-                    },
+        try:
+            if not self.base:
+                return []
+            path = "/api/discussions?sort=-lastPostedAt&page[limit]=15"
+            if self._tag:
+                path += "&filter[tag]=" + urllib.parse.quote(self._tag)
+            code, data = self._request("GET", path)
+            if code != 200 or not data:
+                return []
+            out = []
+            for d in data.get("data", []):
+                a = d.get("attributes", {}) or {}
+                out.append(
+                    Message(
+                        id=str(d.get("id")),
+                        platform="flarum",
+                        conversation_id=str(d.get("id")),
+                        conversation_title=a.get("title", ""),
+                        created_at=a.get("lastPostedAt", "") or a.get("createdAt", ""),
+                        raw={
+                            "lastPostNumber": a.get("lastPostNumber", 0),
+                            "commentCount": a.get("commentCount", 0),
+                        },
+                    )
                 )
-            )
-        return out
+            self._note_success()
+            return out
+        except Exception:
+            self._note_failure()
+            return []
 
     def fetch_detail(self, conversation_id):
         """拉取讨论的全部帖子"""

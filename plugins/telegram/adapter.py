@@ -13,7 +13,8 @@ import urllib.error
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
+from src.core.resilience import ResilienceMixin
 
 API = "https://api.telegram.org"
 TEXT_LIMIT = 4000  # Telegram 单条消息上限 4096，留余量
@@ -21,7 +22,10 @@ POLL_TIMEOUT = 10  # getUpdates 长轮询秒数（M4：从 25s 降到 10s，减�
 
 
 def _http(method, url, body=None, timeout=35):
-    """最小 HTTP 客户端，只用标准库。返回 (status_code, dict)。"""
+    """最小 HTTP 客户端，只用标准库。返回 (status_code, dict)。
+
+    R-M3：401/403 直接抛 AuthError，由调度器统一处理。
+    """
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"Content-Type": "application/json"} if data else {}
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -29,6 +33,8 @@ def _http(method, url, body=None, timeout=35):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise AuthError("Telegram 认证失效（401/403，token 错误或被吊销）")
         try:
             return e.code, json.loads(e.read().decode("utf-8"))
         except Exception:
@@ -66,8 +72,9 @@ def _save_offset(offset: int) -> None:
         pass
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     def __init__(self, config):
+        self._init_resilience()
         super().__init__(config)
         self.token = self._resolve("bot_token", "TELEGRAM_BOT_TOKEN")
         self.chat_filter = str(self.config.get("chat_id") or "").strip()
@@ -87,14 +94,33 @@ class Adapter(PlatformAdapter):
         return _http("GET" if body is None else "POST", url, body, timeout)
 
     def fetch_updates(self) -> list[Message]:
+        # F-M1/H-M3：退避期内直接返回，不发起请求
+        if self._in_backoff() or self._rate_limited():
+            return []
         params = {
             "offset": self._offset,
             "timeout": POLL_TIMEOUT,  # 长轮询秒数
             "allowed_updates": json.dumps(["message", "channel_post"]),
         }
-        code, data = self._api("getUpdates", params=params, timeout=POLL_TIMEOUT + 10)
+        try:
+            code, data = self._api("getUpdates", params=params, timeout=POLL_TIMEOUT + 10)
+        except AuthError:
+            raise
+        except Exception:
+            self._note_failure()
+            return []
         msgs = []
+        # H-M3：Telegram 429 限流时标记非阻塞退避，本轮直接返回
+        if code == 429:
+            retry_after = 0
+            try:
+                retry_after = int((data.get("parameters") or {}).get("retry_after", 0))
+            except Exception:
+                pass
+            self._mark_rate_limited(retry_after)
+            return msgs
         if code != 200 or not data.get("ok"):
+            self._note_failure()
             return msgs
         for upd in data.get("result", []):
             uid = upd.get("update_id", 0)
@@ -128,6 +154,7 @@ class Adapter(PlatformAdapter):
                 raw=upd,
             ))
         _save_offset(self._offset)  # 水位落盘，重启不丢（M1）
+        self._note_success()
         return msgs
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:

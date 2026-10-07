@@ -17,6 +17,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from src.core.base import Message, PlatformAdapter, AuthError
+from src.core.resilience import ResilienceMixin
 
 TIMEOUT = 20
 
@@ -35,15 +36,23 @@ def _strip_html(s):
     return _html.unescape(s).strip()
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     """Discourse 平台适配器"""
 
     def __init__(self, config):
+        self._init_resilience()
         super().__init__(config)
         self.base = _conf(config, "url").rstrip("/")
         self._key = _conf(config, "api_key", "DISCOURSE_API_KEY")
         self._username = _conf(config, "api_username", "DISCOURSE_API_USERNAME")
         self._category = _conf(config, "category_filter")
+
+    def refresh_auth(self) -> bool:
+        """R-M4：API Key 类型无法自动刷新，返回 False 并记日志。"""
+        import logging
+        logging.getLogger(__name__).warning(
+            "Discourse 使用 API Key 认证，无法自动刷新；请在后台重新生成后更新配置")
+        return False
 
     def _request(self, method, path, payload=None):
         try:
@@ -72,29 +81,36 @@ class Adapter(PlatformAdapter):
 
     def fetch_updates(self):
         """轻量拉取最新主题列表"""
-        if not self.base:
+        if self._in_backoff() or self._rate_limited():
             return []
-        path = "/latest.json"
-        if self._category:
-            path = "/c/{}.json".format(urllib.parse.quote(self._category))
-        code, data = self._request("GET", path)
-        if code != 200 or not data:
-            return []
-        topics = ((data.get("topic_list") or {}).get("topics")) or []
-        out = []
-        for t in topics:
-            out.append(
-                Message(
-                    id=str(t.get("id")),
-                    platform="discourse",
-                    conversation_id=str(t.get("id")),
-                    conversation_title=t.get("title", ""),
-                    author_name=t.get("last_poster_username", ""),
-                    created_at=t.get("last_posted_at", "") or t.get("created_at", ""),
-                    raw={"posts_count": t.get("posts_count", 0)},
+        try:
+            if not self.base:
+                return []
+            path = "/latest.json"
+            if self._category:
+                path = "/c/{}.json".format(urllib.parse.quote(self._category))
+            code, data = self._request("GET", path)
+            if code != 200 or not data:
+                return []
+            topics = ((data.get("topic_list") or {}).get("topics")) or []
+            out = []
+            for t in topics:
+                out.append(
+                    Message(
+                        id=str(t.get("id")),
+                        platform="discourse",
+                        conversation_id=str(t.get("id")),
+                        conversation_title=t.get("title", ""),
+                        author_name=t.get("last_poster_username", ""),
+                        created_at=t.get("last_posted_at", "") or t.get("created_at", ""),
+                        raw={"posts_count": t.get("posts_count", 0)},
+                    )
                 )
-            )
-        return out
+            self._note_success()
+            return out
+        except Exception:
+            self._note_failure()
+            return []
 
     def fetch_detail(self, conversation_id):
         """拉取主题的全部帖子"""

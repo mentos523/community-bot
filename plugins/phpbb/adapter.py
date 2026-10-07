@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from src.core.base import Message, PlatformAdapter, AuthError
+from src.core.resilience import ResilienceMixin
 
 TIMEOUT = 20
 
@@ -39,7 +40,11 @@ def _strip_html(s):
 
 
 def _to_iso(ts):
-    """unix 时间戳 / ISO 字符串 -> ISO 字符串"""
+    """R-M2：unix 时间戳 / ISO 字符串 -> ISO 字符串。
+
+    非 ISO 字符串先尝试按常见格式解析，解析失败返回空字符串
+    （不再原样透传，避免调度器梯度逻辑误判）。
+    """
     if not ts:
         return ""
     if isinstance(ts, (int, float)):
@@ -47,18 +52,52 @@ def _to_iso(ts):
             return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
         except Exception:
             return ""
-    return str(ts)
+    s = str(ts).strip()
+    if not s:
+        return ""
+    # 纯数字视为 unix 时间戳（秒或毫秒）
+    if s.isdigit():
+        try:
+            v = int(s)
+            if v > 10 ** 12:  # 毫秒
+                v = v / 1000
+            return datetime.fromtimestamp(v, tz=timezone.utc).isoformat()
+        except Exception:
+            return ""
+    # 已经是 ISO 格式
+    if "T" in s:
+        try:
+            datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return s
+        except Exception:
+            return ""
+    # 常见日期格式尝试解析
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
+                "%Y-%m-%d", "%d-%m-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc).isoformat()
+        except Exception:
+            continue
+    return ""
 
 
-class Adapter(PlatformAdapter):
+class Adapter(PlatformAdapter, ResilienceMixin):
     """phpBB 平台适配器"""
 
     def __init__(self, config):
+        self._init_resilience()
         super().__init__(config)
         self.base = _conf(config, "url").rstrip("/")
         self.api = _conf(config, "api_path", default="/api").rstrip("/")
         self._key = _conf(config, "api_key", "PHPBB_API_KEY")
         self._forum = _conf(config, "forum_filter")
+
+    def refresh_auth(self) -> bool:
+        """R-M4：API Key 类型无法自动刷新，返回 False 并记日志。"""
+        import logging
+        logging.getLogger(__name__).warning(
+            "phpBB 使用 API Key 认证，无法自动刷新；请人工更换后更新配置")
+        return False
 
     def _request(self, method, path, payload=None):
         try:
@@ -93,35 +132,42 @@ class Adapter(PlatformAdapter):
 
     def fetch_updates(self):
         """轻量拉取主题列表"""
-        if not self.base:
+        if self._in_backoff() or self._rate_limited():
             return []
-        path = "/topics?limit=15&sort=last_post_time&order=desc"
-        if self._forum:
-            path += "&forum_id=" + urllib.parse.quote(self._forum)
-        code, data = self._request("GET", path)
-        if code != 200:
-            return []
-        out = []
-        for t in self._topics_of(data):
-            tid = t.get("topic_id", t.get("id", ""))
-            out.append(
-                Message(
-                    id=str(tid),
-                    platform="phpbb",
-                    conversation_id=str(tid),
-                    conversation_title=t.get("topic_title", t.get("title", "")),
-                    author_name=t.get("last_poster", t.get("topic_last_poster_name", "")),
-                    created_at=_to_iso(
-                        t.get("last_post_time", t.get("topic_last_post_time", ""))
-                    ),
-                    raw={
-                        "post_count": t.get(
-                            "topic_posts_count", t.get("post_count", 0)
-                        )
-                    },
+        try:
+            if not self.base:
+                return []
+            path = "/topics?limit=15&sort=last_post_time&order=desc"
+            if self._forum:
+                path += "&forum_id=" + urllib.parse.quote(self._forum)
+            code, data = self._request("GET", path)
+            if code != 200:
+                return []
+            out = []
+            for t in self._topics_of(data):
+                tid = t.get("topic_id", t.get("id", ""))
+                out.append(
+                    Message(
+                        id=str(tid),
+                        platform="phpbb",
+                        conversation_id=str(tid),
+                        conversation_title=t.get("topic_title", t.get("title", "")),
+                        author_name=t.get("last_poster", t.get("topic_last_poster_name", "")),
+                        created_at=_to_iso(
+                            t.get("last_post_time", t.get("topic_last_post_time", ""))
+                        ),
+                        raw={
+                            "post_count": t.get(
+                                "topic_posts_count", t.get("post_count", 0)
+                            )
+                        },
+                    )
                 )
-            )
-        return out
+            self._note_success()
+            return out
+        except Exception:
+            self._note_failure()
+            return []
 
     def fetch_detail(self, conversation_id):
         """拉取主题的全部帖子"""
