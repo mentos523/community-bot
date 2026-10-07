@@ -1,0 +1,25 @@
+name: line
+version: 1.0.0
+description: LINE Messaging API 适配器
+author: robbin
+platform_type: chat  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  channel_access_token:
+    type: string
+    required: true
+    secret: true
+    description: Channel Access Token
+    env_var: LINE_CHANNEL_ACCESS_TOKEN
+  channel_secret:
+    type: string
+    required: true
+    secret: true
+    description: Channel Secret（用于校验 Webhook 签名）
+    env_var: LINE_CHANNEL_SECRET
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

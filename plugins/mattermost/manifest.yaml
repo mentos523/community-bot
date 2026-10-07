@@ -1,0 +1,27 @@
+name: mattermost
+version: 1.0.0
+description: Mattermost 适配器
+author: robbin
+platform_type: chat  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  server_url:
+    type: string
+    required: true
+    description: Mattermost 服务器地址，如 https://chat.example.com
+  token:
+    type: string
+    required: true
+    secret: true
+    description: 个人访问令牌（Personal Access Token）
+    env_var: MATTERMOST_TOKEN
+  channel_id:
+    type: string
+    required: false
+    description: 限定监听的频道 ID（留空则监听所有加入的频道）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

@@ -1,0 +1,29 @@
+name: whatsapp
+version: 1.0.0
+description: WhatsApp Cloud API 适配器
+author: robbin
+platform_type: chat  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  phone_number_id:
+    type: string
+    required: true
+    description: 电话号码 ID（Phone Number ID）
+    env_var: WHATSAPP_PHONE_NUMBER_ID
+  access_token:
+    type: string
+    required: true
+    secret: true
+    description: Meta 长期访问令牌
+    env_var: WHATSAPP_ACCESS_TOKEN
+  api_version:
+    type: string
+    required: false
+    default: v21.0
+    description: Graph API 版本
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

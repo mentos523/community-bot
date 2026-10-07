@@ -1,0 +1,27 @@
+name: matrix
+version: 1.0.0
+description: Matrix 适配器
+author: robbin
+platform_type: chat  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  homeserver:
+    type: string
+    required: true
+    description: Homeserver 地址，如 https://matrix.org
+  access_token:
+    type: string
+    required: true
+    secret: true
+    description: Access Token
+    env_var: MATRIX_ACCESS_TOKEN
+  user_id:
+    type: string
+    required: false
+    description: 机器人完整用户 ID，如 @bot:matrix.org（用于过滤自己发的消息）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply
