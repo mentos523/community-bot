@@ -9,7 +9,7 @@
 {% for sec in sections %}
 <div class="card">
   <h3>{{ sec.title }}</h3>
-  {% for f in sec.items %}
+  {% for f in sec['items'] %}
   <div class="field">
     <label>{{ f.label }}</label>
     {% if f.type == "boolean" %}
