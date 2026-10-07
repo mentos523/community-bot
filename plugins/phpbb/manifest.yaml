@@ -1,0 +1,32 @@
+name: phpbb
+version: 1.0.0
+description: phpBB 论坛适配器（需要安装 phpBB REST API 扩展，phpBB 核心无内置 API）
+author: robbin
+platform_type: forum  # forum | chat
+
+config_schema:
+  url:
+    type: string
+    required: true
+    description: 论坛地址，如 https://example.com
+  api_key:
+    type: string
+    required: true
+    secret: true
+    description: API 扩展的 Key
+    env_var: PHPBB_API_KEY
+  api_path:
+    type: string
+    required: false
+    default: /api
+    description: API 扩展挂载路径（默认 /api）
+  forum_filter:
+    type: string
+    required: false
+    default: ""
+    description: 版块 ID 过滤（留空则全站）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

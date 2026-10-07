@@ -1,0 +1,26 @@
+name: nodebb
+version: 1.0.0
+description: NodeBB 论坛适配器
+author: robbin
+platform_type: forum  # forum | chat
+
+config_schema:
+  url:
+    type: string
+    required: true
+    description: 论坛地址，如 https://example.com
+  token:
+    type: string
+    required: true
+    secret: true
+    description: 用户 Token（后台管理 → 用户 → 生成 Token，需写入权限）
+    env_var: NODEBB_TOKEN
+  uid:
+    type: string
+    required: false
+    description: 机器人用户 UID（用于发帖归属，可选）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

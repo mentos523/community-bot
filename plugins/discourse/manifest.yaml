@@ -1,0 +1,32 @@
+name: discourse
+version: 1.0.0
+description: Discourse 论坛适配器
+author: robbin
+platform_type: forum  # forum | chat
+
+config_schema:
+  url:
+    type: string
+    required: true
+    description: 论坛地址，如 https://example.com
+  api_key:
+    type: string
+    required: true
+    secret: true
+    description: API Key（管理后台 /admin/api/keys 生成）
+    env_var: DISCOURSE_API_KEY
+  api_username:
+    type: string
+    required: true
+    description: API Key 归属的用户名
+    env_var: DISCOURSE_API_USERNAME
+  category_filter:
+    type: string
+    required: false
+    default: ""
+    description: 分类 slug 过滤（留空则全站）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply
