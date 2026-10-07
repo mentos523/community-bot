@@ -1,39 +1,176 @@
-# 社区机器人配置文件示例
-# 复制为 config.yaml 后修改
-# 密钥类请用环境变量提供，不要写明文
+# =====================================================================
+# 社区机器人配置文件
+#
+# 使用方法：
+#   1. 复制本文件为 config.yaml：cp config.example.yaml config.yaml
+#   2. 按注释填写你的社区和模型信息
+#   3. 密钥类（token / 密码 / API Key）一律用环境变量提供，不要写明文
+#   4. 启动：python -m src.main
+#      Web 管理：python -m src.web.app（默认 http://localhost:52323）
+#
+# 配置优先级（同一项）：Web 界面修改 > 本文件 > 环境变量 > 默认值
+# =====================================================================
 
+
+# =====================================================================
+# 社区列表：可配置多个社区，每个社区独立选用插件和模型
+# =====================================================================
 communities:
-  - name: "示例社区"
-    plugin: flarum            # 插件名（plugins/ 下的目录名）
-    enabled: true
-    url: "https://example.com"
-    # 平台认证信息通过环境变量提供，如 FLARUM_TOKEN
+  # ---- 示例 1：Flarum 论坛 ----
+  - name: "学习交流"            # 自定义名称，日志和 Web 界面里显示用
+    plugin: flarum             # 插件名 = plugins/ 下的目录名（flarum/discourse/telegram……）
+    enabled: true              # false 则跳过该社区
+    model: "qwen2.5:7b"        # 本社区用的模型（不填则用下面的 default_model）
 
+    # --- 插件相关配置（具体有哪些项，看 plugins/flarum/manifest.yaml）---
+    url: "https://example.com" # 论坛地址，http:// 或 https:// 开头，末尾不要加 /
+
+    # 认证二选一（推荐 token；账号密码用于 token 失效时自动重新登录）：
+    #   token:    走环境变量 FLARUM_TOKEN（Flarum 后台 → 个人资料 → API 令牌）
+    #   username / password: 走环境变量 FLARUM_USERNAME / FLARUM_PASSWORD
+    #     守护进程 401/403 时会用账号密码 POST /api/token 全新登录换 token，
+    #     换到的新 token 只保存在内存 + data/state.json（600 权限），不回写本文件
+    # username: "Ai-EDU"
+    tag_filter: "communicate"  # 只处理该标签下的讨论，留空则全板块
+
+  # ---- 示例 2：Telegram 群（默认禁用，启用时去掉注释）----
+  # - name: "技术交流群"
+  #   plugin: telegram
+  #   enabled: false
+  #   model: "gpt-4o-mini"
+  #   # bot_token 走环境变量 TELEGRAM_BOT_TOKEN（找 @BotFather 申请）
+  #   # chat_id: "-1001234567890"   # 指定群组 ID，留空则监听 Bot 收到的所有消息
+
+
+# =====================================================================
+# 模型列表：本地 / 远端自建 / 商业模型可混用，每个社区独立选用
+# =====================================================================
 models:
-  - name: "qwen2.5:7b"
-    type: local               # local | remote | openai | gemini | anthropic
-    endpoint: "http://localhost:11434"
-    # 本地模型：web 界面可自动扫描
-  - name: "gpt-4o-mini"
-    type: openai
-    # api_key: 环境变量 OPENAI_API_KEY
+  # ---- 本地模型（Ollama）----
+  # 调用方式：POST {endpoint}/api/generate，JSON body {model, prompt, stream:false, options}
+  # 协议头：Content-Type: application/json（Ollama 默认无需认证）
+  # Web 界面点"扫描本地模型"会自动发现 Ollama 里的模型并填到这里
+  - name: "qwen2.5:7b"          # 自定义名称，communities.model 引用它
+    type: local
+    endpoint: "http://localhost:11434"  # Ollama 地址；远端 Ollama 改成 http://IP:11434
+    options:                   # 透传给 Ollama 的参数（见 Ollama 文档）
+      temperature: 0.7         # 0-1，越低越严谨，越高越发散
+      num_predict: 1500        # 最多生成 token 数
 
-  # 默认模型
+  # ---- 远端自建模型（OpenAI 兼容接口）----
+  # 适用于：vLLM / LM Studio / Xinference / Ollama 远端 / 其他 OpenAI 兼容服务
+  # 调用方式：POST {endpoint}/v1/chat/completions
+  # 协议头：
+  #   Content-Type: application/json
+  #   Authorization: Bearer {api_key}      ← api_key 从环境变量读
+  # body: {model, messages:[{role, content}], temperature, max_tokens}
+  # - name: "my-remote-qwen"
+  #   type: remote
+  #   endpoint: "https://llm.example.com"  # 注意是 https，内网可 http
+  #   api_key_env: "MY_LLM_API_KEY"        # 指定环境变量名（默认 {NAME}_API_KEY）
+  #   options:
+  #     temperature: 0.7
+  #     max_tokens: 1500
+
+  # ---- OpenAI 官方 ----
+  # 调用方式：POST https://api.openai.com/v1/chat/completions
+  # 协议头：
+  #   Content-Type: application/json
+  #   Authorization: Bearer {OPENAI_API_KEY}
+  # - name: "gpt-4o-mini"
+  #   type: openai
+  #   # api_key 走环境变量 OPENAI_API_KEY
+  #   options:
+  #     temperature: 0.7
+  #     max_tokens: 1500
+
+  # ---- Google Gemini ----
+  # 调用方式：POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+  # 协议头：
+  #   Content-Type: application/json
+  #   x-goog-api-key: {GEMINI_API_KEY}     ← 注意 Gemini 用专用头，不是 Bearer
+  # - name: "gemini-2.0-flash"
+  #   type: gemini
+  #   # api_key 走环境变量 GEMINI_API_KEY
+
+  # ---- Anthropic Claude ----
+  # 调用方式：POST https://api.anthropic.com/v1/messages
+  # 协议头：
+  #   Content-Type: application/json
+  #   x-api-key: {ANTHROPIC_API_KEY}       ← 专用头
+  #   anthropic-version: 2023-06-01       ← 必填版本头
+  # - name: "claude-4-sonnet"
+  #   type: anthropic
+  #   # api_key 走环境变量 ANTHROPIC_API_KEY
+
+# 没给社区单独指定 model 时，用的就是这个
 default_model: "qwen2.5:7b"
 
+
+# =====================================================================
+# 提示词：发给模型的指令模板，可按社区需求调整
+#   {bot_name} 会被替换为机器人名字，{content} 会被替换为用户问题
+# =====================================================================
+prompts:
+  bot_name: "助教"              # 机器人在 prompt 里的自称
+
+  # 完整版 prompt（默认用这个）
+  template: |
+    你是{bot_name}，社区里的助教。
+
+    要求：
+    1. 用12岁孩子能听懂的中文回答，专业术语先解释，多用生活中的类比
+    2. 一次性完整回答，不要分段设悬念
+    3. 不要加"还有什么问题可以问我"之类的结尾
+    4. 直接输出回复正文，不要输出思考过程
+
+    问题：{content}
+
+  # 简化版 prompt：完整版生成后校验失败时，重试用这个
+  short_template: "你是{bot_name}，社区助教。用12岁孩子能懂的中文简短完整地回答，不要输出思考过程，直接给正文：{content}"
+
+
+# =====================================================================
+# 回复规则：什么值得回、多久回一次
+# =====================================================================
 rules:
-  # 回复规则
-  min_question_length: 5      # 问题最短长度
-  max_replies_per_discussion_per_day: 2
-  max_replies_per_day: 20
+  # --- 值得回复的门槛（同时满足才回，特定用户除外）---
+  min_question_length: 5       # 问题正文最短字符数，太短的（如"顶"、"？"）不回
+  skip_keywords: ["测试", "test", "签到"]  # 内容含这些词的不回
 
-  # 梯度轮询间隔（秒）
-  tier_intervals:
-    hot: 60                   # 1小时内有活动
-    warm: 1800                # 1-24小时：30分钟
-    cold: 604800              # 24小时-3天：每周
-    # archived: 不检查
+  # --- 特定用户：名单里的用户每次都回，不受上面门槛限制 ---
+  always_reply_users: ["robbin"]
 
+  # --- 频率控制（防刷屏、防烧 token）---
+  max_replies_per_discussion_per_day: 2  # 同一讨论每天最多回 2 次
+  max_replies_per_day: 20                # 所有社区加起来每天最多 20 次
+
+  # --- 回复风格 ---
+  reply_style:
+    max_length: 800            # 回复最长字符数，超长会被截断（按句截断不断句）
+    no_trailing: true          # true = 不加"随时问我"类结尾
+
+
+# =====================================================================
+# 梯度轮询：按"最后活动时间"分级检查，越不活跃查得越少（省浏览量）
+#   hot     ：1 小时内有新回帖 → 每 60 秒检查
+#   warm     ：1–24 小时无新回帖 → 每 30 分钟检查
+#   cold     ：24 小时–3 天无新回帖 → 每周检查一次
+#   archived ：超过 3 天无新回帖 → 不再进详情
+# 另有安全网：每 60 秒拉一次轻量讨论列表（只取 ID 和最后活动时间，
+# 不进详情、不产生浏览量），有新帖/新回帖立即升为 hot，不会漏回
+# =====================================================================
+tiers:
+  hot_interval: 60             # 秒
+  warm_interval: 1800          # 秒 = 30 分钟
+  cold_interval: 604800        # 秒 = 7 天
+  # archived_interval: 不设，归档后不再进详情
+
+
+# =====================================================================
+# Web 管理界面
+# =====================================================================
 web:
-  host: "0.0.0.0"
-  port: 52323
+  host: "127.0.0.1"            # 默认只监听本机；局域网访问改为 "0.0.0.0"
+  port: 52323                  # 默认端口
+  # 管理密码走环境变量 WEB_PASSWORD（Web 界面登录用，强烈建议设置）

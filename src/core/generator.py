@@ -17,20 +17,33 @@ PROMPT_TEMPLATE = """你是{bot_name}，社区里的助教。
 SHORT_PROMPT_TEMPLATE = """你是{bot_name}，社区助教。用12岁孩子能懂的中文简短完整地回答，不要输出思考过程，直接给正文：{content}"""
 
 
-def build_prompt(content: str, bot_name: str = "助教") -> str:
-    """构造完整版 prompt。"""
-    return PROMPT_TEMPLATE.format(bot_name=bot_name, content=content.strip())
+def build_prompt(content: str, bot_name: str = "助教", template: str | None = None) -> str:
+    """构造完整版 prompt。template 为空时用内置默认模板。"""
+    tpl = template or PROMPT_TEMPLATE
+    return tpl.format(bot_name=bot_name, content=content.strip())
+
+
+def build_short_prompt(content: str, bot_name: str = "助教", template: str | None = None) -> str:
+    """构造简化版 prompt（重试用）。"""
+    tpl = template or SHORT_PROMPT_TEMPLATE
+    return tpl.format(bot_name=bot_name, content=content.strip())
 
 
 def generate_reply(model_manager, model_name: str, content: str,
                    bot_name: str = "助教", max_length: int = 0,
-                   options: dict | None = None, logger=None) -> tuple[str | None, str]:
+                   options: dict | None = None, logger=None,
+                   prompts_cfg: dict | None = None) -> tuple[str | None, str]:
     """生成并校验回复。失败时用简化 prompt 重试一次。
+
+    prompts_cfg: 配置文件 prompts 段，可含 bot_name/template/short_template。
+    为空时用内置默认模板（向后兼容）。
 
     返回 (正文|None, 原因)。
     """
-    prompts = [build_prompt(content, bot_name),
-               SHORT_PROMPT_TEMPLATE.format(bot_name=bot_name, content=content.strip())]
+    prompts_cfg = prompts_cfg or {}
+    bot_name = prompts_cfg.get("bot_name", bot_name)
+    prompts = [build_prompt(content, bot_name, prompts_cfg.get("template")),
+               build_short_prompt(content, bot_name, prompts_cfg.get("short_template"))]
     reason = ""
     for i, prompt in enumerate(prompts):
         try:

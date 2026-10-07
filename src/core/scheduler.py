@@ -226,6 +226,7 @@ class Scheduler:
             max_length=style.get("max_length", 0),
             options=self.mm.models.get(model_name, {}).get("options"),
             logger=self.log,
+            prompts_cfg=self.config.get("prompts", {}),
         )
         if not text:
             self.log.warning(f"[{name}] {msg.conversation_id} 生成失败: {reason}")
