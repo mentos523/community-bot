@@ -47,6 +47,38 @@ def _chunks(text, limit):
     return [text[i:i + limit] for i in range(0, len(text), limit)]
 
 
+def _safe_int(v, default=0):
+    """畸形 create_time 防崩溃（M5）：失败返回 default，调用方跳过该条。"""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _data_file(name: str) -> str:
+    """data 目录下持久化文件路径（相对项目根目录 data/）。"""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", name)
+
+
+def _load_json(path: str, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _save_json(path: str, obj) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
 class Adapter(PlatformAdapter):
     def __init__(self, config):
         super().__init__(config)
@@ -56,7 +88,9 @@ class Adapter(PlatformAdapter):
         self.chats = [c.strip() for c in str(chs).split(",") if c.strip()]
         self._token = ""
         self._token_exp = 0
-        self._last_time = {}  # chat_id -> int（毫秒时间戳水位）
+        # chat_id -> 毫秒时间戳水位。重启后从文件恢复（M2）。
+        self._last_time = {k: _safe_int(v) for k, v in
+                           _load_json(_data_file("feishu_last_time.json"), {}).items()}
         self._bot_id = None
 
     def _resolve(self, key, env_var):
@@ -123,13 +157,16 @@ class Adapter(PlatformAdapter):
             items = (data.get("data") or {}).get("items", [])
             if not items:
                 continue
-            max_t = max(int(i.get("create_time", 0)) for i in items)
+            # 时间解析防崩溃（M5）：畸形 create_time 视为 0，后续被水位过滤跳过
+            max_t = max((_safe_int(i.get("create_time")) for i in items), default=0)
             if cid not in self._last_time:
                 self._last_time[cid] = max_t
+                _save_json(_data_file("feishu_last_time.json"), self._last_time)
                 continue  # 首轮只记水位，不回历史
-            for i in sorted(items, key=lambda x: int(x.get("create_time", 0))):
-                ct = int(i.get("create_time", 0))
-                if ct <= self._last_time[cid]:
+            water = self._last_time.get(cid, 0)
+            for i in sorted(items, key=lambda x: _safe_int(x.get("create_time"))):
+                ct = _safe_int(i.get("create_time"))
+                if ct <= 0 or ct <= water:
                     continue
                 sender = i.get("sender") or {}
                 if bot_id and sender.get("id") == bot_id:
@@ -145,10 +182,11 @@ class Adapter(PlatformAdapter):
                     author_id=sender.get("id", ""),
                     author_name="",
                     content=text,
-                    created_at=datetime.fromtimestamp(ct / 1000, tz=timezone.utc).isoformat(),
+                    created_at=datetime.fromtimestamp(ct / 1000, tz=timezone.utc).isoformat() if ct else "",
                     raw=i,
                 ))
             self._last_time[cid] = max_t
+        _save_json(_data_file("feishu_last_time.json"), self._last_time)
         return msgs
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:

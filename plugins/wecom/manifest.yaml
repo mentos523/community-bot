@@ -1,6 +1,6 @@
 name: wecom
-version: 1.0.0
-description: 企业微信适配器
+version: 1.1.0
+description: 企业微信适配器（仅发送：官方无消息拉取 API，接收需另配回调 URL 或会话存档）
 author: robbin
 platform_type: chat  # forum | chat
 
@@ -24,6 +24,6 @@ config_schema:
     env_var: WECOM_AGENT_ID
 
 capabilities:
-  - fetch_updates
+  # 注意：企业微信官方没有拉取消息的 API，故不声明 fetch_updates（仅发送）
   - fetch_detail
   - reply

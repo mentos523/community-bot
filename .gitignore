@@ -17,3 +17,6 @@ logs/
 .DS_Store
 .idea/
 .vscode/
+
+# 运行时状态（水位、游标，不进仓库）
+data/

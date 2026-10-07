@@ -17,6 +17,7 @@ from src.core.base import PlatformAdapter, Message
 
 API = "https://api.telegram.org"
 TEXT_LIMIT = 4000  # Telegram 单条消息上限 4096，留余量
+POLL_TIMEOUT = 10  # getUpdates 长轮询秒数（M4：从 25s 降到 10s，减少调度阻塞）
 
 
 def _http(method, url, body=None, timeout=35):
@@ -40,12 +41,37 @@ def _chunks(text, limit):
     return [text[i:i + limit] for i in range(0, len(text), limit)]
 
 
+def _data_file(name: str) -> str:
+    """data 目录下持久化文件路径（相对项目根目录 data/）。"""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", name)
+
+
+def _load_offset() -> int:
+    try:
+        with open(_data_file("telegram_offset.json"), encoding="utf-8") as f:
+            return int(json.load(f).get("offset", 0))
+    except Exception:
+        return 0
+
+
+def _save_offset(offset: int) -> None:
+    try:
+        path = _data_file("telegram_offset.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"offset": offset}, f)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
 class Adapter(PlatformAdapter):
     def __init__(self, config):
         super().__init__(config)
         self.token = self._resolve("bot_token", "TELEGRAM_BOT_TOKEN")
         self.chat_filter = str(self.config.get("chat_id") or "").strip()
-        self._offset = 0  # getUpdates 水位
+        self._offset = _load_offset()  # getUpdates 水位，持久化防重启重复（M1）
 
     def _resolve(self, key, env_var):
         return (self.config.get(key) or os.environ.get(env_var, "") or "").strip()
@@ -63,10 +89,10 @@ class Adapter(PlatformAdapter):
     def fetch_updates(self) -> list[Message]:
         params = {
             "offset": self._offset,
-            "timeout": 25,  # 长轮询 25 秒
+            "timeout": POLL_TIMEOUT,  # 长轮询秒数
             "allowed_updates": json.dumps(["message", "channel_post"]),
         }
-        code, data = self._api("getUpdates", params=params, timeout=35)
+        code, data = self._api("getUpdates", params=params, timeout=POLL_TIMEOUT + 10)
         msgs = []
         if code != 200 or not data.get("ok"):
             return msgs
@@ -101,6 +127,7 @@ class Adapter(PlatformAdapter):
                 created_at=datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
                 raw=upd,
             ))
+        _save_offset(self._offset)  # 水位落盘，重启不丢（M1）
         return msgs
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:
@@ -120,4 +147,4 @@ class Adapter(PlatformAdapter):
         return True
 
     def get_info(self) -> dict:
-        return {"platform": "telegram", "mode": self.config.get("mode", "polling")}
+        return {"platform": "telegram", "mode": "polling"}

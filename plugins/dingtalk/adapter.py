@@ -26,6 +26,11 @@ from src.core.base import PlatformAdapter, Message
 TEXT_LIMIT = 20000
 
 
+def _chunks(text, limit):
+    """超长文本按 limit 切片，分多条发送而非截断丢字（M8）。"""
+    return [text[i:i + limit] for i in range(0, len(text), limit)]
+
+
 def _http_post(url, body, timeout=30):
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
@@ -86,9 +91,13 @@ class Adapter(PlatformAdapter):
         # 一个 webhook 对应一个群，conversation_id 仅作标识，不参与寻址
         if not content or not content.strip():
             return False
-        body = {"msgtype": "text", "text": {"content": content[:TEXT_LIMIT]}}
-        _, data = _http_post(self._signed_url(), body)
-        return data.get("errcode") == 0
+        # 超长内容分多条发送（M8），原先 content[:20000] 直接截断会丢字
+        for chunk in _chunks(content, TEXT_LIMIT):
+            body = {"msgtype": "text", "text": {"content": chunk}}
+            _, data = _http_post(self._signed_url(), body)
+            if data.get("errcode") != 0:
+                return False
+        return True
 
     def get_info(self) -> dict:
         return {"platform": "dingtalk", "mode": "webhook-send-only"}

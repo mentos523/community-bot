@@ -22,6 +22,12 @@ config_schema:
     required: false
     default: v21.0
     description: Graph API 版本
+  app_secret:
+    type: string
+    required: false
+    secret: true
+    description: Meta 应用密钥（用于校验 Webhook 签名 X-Hub-Signature-256；未配置则带签名的回调会被拒绝）
+    env_var: WHATSAPP_APP_SECRET
 
 capabilities:
   - fetch_updates

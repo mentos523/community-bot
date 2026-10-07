@@ -15,11 +15,7 @@ config_schema:
     type: string
     required: false
     description: 默认目标群组/频道 ID（留空则监听所有）
-  mode:
-    type: string
-    required: false
-    default: polling
-    description: polling 或 webhook
+  # 注意：当前仅实现长轮询（polling）模式，webhook 模式暂未实现
 
 capabilities:
   - fetch_updates
