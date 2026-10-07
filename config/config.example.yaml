@@ -4,7 +4,8 @@
 
 communities:
   - name: "示例社区"
-    platform: flarum          # flarum | discourse | telegram | discord
+    plugin: flarum            # 插件名（plugins/ 下的目录名）
+    enabled: true
     url: "https://example.com"
     # 平台认证信息通过环境变量提供，如 FLARUM_TOKEN
 

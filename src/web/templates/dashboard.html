@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - 社区机器人{% endblock %}
+{% block content %}
+<h2>仪表盘</h2>
+
+<div class="card">
+  <h3>社区</h3>
+  {% if communities %}
+  <table>
+    <tr><th>名称</th><th>插件</th><th>状态</th><th>今日回复</th></tr>
+    {% for c in communities %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td>{{ c.plugin }}</td>
+      <td>
+        {% if c.enabled and enabled_map.get(c.plugin, True) %}
+          <span class="badge ok">在线</span>
+        {% else %}
+          <span class="badge gray">停用</span>
+        {% endif %}
+      </td>
+      <td>—</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">暂无社区配置，去 <a href="/plugins">插件管理</a> 配置。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>模型</h3>
+  <p>默认模型：<b>{{ default_model or "未设置" }}</b>（共 {{ models|length }} 个）</p>
+  <p>Ollama 本地：
+    {% if ollama_ok %}
+      <span class="badge ok">可达</span>
+      <span class="hint">{{ ollama_models|join(", ") }}</span>
+    {% else %}
+      <span class="badge bad">不可达</span>
+    {% endif %}
+  </p>
+</div>
+{% endblock %}

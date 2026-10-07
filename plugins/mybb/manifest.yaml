@@ -1,0 +1,28 @@
+name: mybb
+version: 1.0.0
+description: MyBB 论坛适配器
+author: robbin
+platform_type: forum  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  url:
+    type: string
+    required: true
+    description: 论坛地址，如 https://example.com
+  api_key:
+    type: string
+    required: true
+    secret: true
+    description: MyBB API 插件密钥
+    env_var: MYBB_API_KEY
+  fid:
+    type: string
+    required: false
+    default: ""
+    description: 版块 ID（留空则全站）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

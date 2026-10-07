@@ -1,0 +1,23 @@
+name: discord
+version: 1.0.0
+description: Discord Bot 适配器（REST 轮询）
+author: robbin
+platform_type: chat
+
+config_schema:
+  bot_token:
+    type: string
+    required: true
+    secret: true
+    description: Discord 开发者门户申请的 Bot Token
+    env_var: DISCORD_BOT_TOKEN
+  channel_ids:
+    type: string
+    required: true
+    description: 监听的频道 ID，多个用英文逗号分隔
+    env_var: DISCORD_CHANNEL_IDS
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

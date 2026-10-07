@@ -1,0 +1,22 @@
+name: dingtalk
+version: 1.0.0
+description: 钉钉自定义群机器人适配器（仅发送；接收需配合 webhook 接收服务）
+author: robbin
+platform_type: chat
+
+config_schema:
+  webhook_url:
+    type: string
+    required: true
+    secret: true
+    description: 群机器人 Webhook 地址（含 access_token）
+    env_var: DINGTALK_WEBHOOK
+  secret:
+    type: string
+    required: false
+    secret: true
+    description: 加签密钥（SEC 开头；机器人安全设置开启加签时必填）
+    env_var: DINGTALK_SECRET
+
+capabilities:
+  - reply

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}日志查看 - 社区机器人{% endblock %}
+{% block content %}
+<h2>日志查看</h2>
+<div class="card">
+  {% if files %}
+  <form method="get" action="/logs" class="inline">
+    <select name="file" onchange="this.form.submit()">
+      {% for f in files %}
+      <option value="{{ f.name }}" {% if f.name == sel %}selected{% endif %}>{{ f.name }} ({{ f.size }} 字节)</option>
+      {% endfor %}
+    </select>
+  </form>
+  <form method="get" action="/logs" class="inline">
+    <input type="hidden" name="file" value="{{ sel }}">
+    <select name="n">
+      <option value="100">100 行</option>
+      <option value="200" selected>200 行</option>
+      <option value="500">500 行</option>
+      <option value="1000">1000 行</option>
+    </select>
+    <button type="submit">刷新</button>
+  </form>
+  <p class="hint">共 {{ total }} 行，显示最后 {{ lines|length }} 行</p>
+  <pre class="log">{% for l in lines %}{{ l }}{% endfor %}</pre>
+  {% else %}
+  <p class="hint">logs/ 目录为空或不存在。</p>
+  {% endif %}
+</div>
+{% endblock %}

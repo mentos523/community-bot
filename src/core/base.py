@@ -17,6 +17,11 @@ class Message:
     raw: dict = field(default_factory=dict)
 
 
+class AuthError(Exception):
+    """认证失效（token 过期等）。调度器捕获后会调用 refresh_auth() 重试一次。"""
+    pass
+
+
 class PlatformAdapter(ABC):
     """平台适配器基类"""
 
@@ -46,3 +51,7 @@ class PlatformAdapter(ABC):
     def get_info(self) -> dict:
         """平台元信息"""
         return {"platform": self.__class__.__name__}
+
+    def refresh_auth(self) -> bool:
+        """刷新认证（如 token 过期时全新登录）。返回是否成功，默认不支持。"""
+        return False

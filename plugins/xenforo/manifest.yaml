@@ -1,0 +1,28 @@
+name: xenforo
+version: 1.0.0
+description: XenForo 论坛适配器
+author: robbin
+platform_type: forum  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  url:
+    type: string
+    required: true
+    description: 论坛地址，如 https://example.com
+  api_key:
+    type: string
+    required: true
+    secret: true
+    description: XenForo API Key（后台 Users > API keys 创建）
+    env_var: XENFORO_API_KEY
+  node_id:
+    type: string
+    required: false
+    default: ""
+    description: 节点（版块）ID（留空则全站）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

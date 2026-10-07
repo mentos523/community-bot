@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}社区机器人{% endblock %}</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; background: #f4f4f4; color: #222; }
+nav { background: #222; padding: 10px 16px; }
+nav a { color: #ddd; margin-right: 18px; text-decoration: none; }
+nav a:hover { color: #fff; }
+.wrap { max-width: 960px; margin: 20px auto; padding: 0 16px; }
+.card { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+th { background: #f0f0f0; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.ok { background: #d4edda; color: #155724; }
+.bad { background: #f8d7da; color: #721c24; }
+.warn { background: #fff3cd; color: #856404; }
+.gray { background: #eee; color: #666; }
+input[type=text], input[type=password], input[type=number], select { padding: 6px; width: 100%; max-width: 420px; box-sizing: border-box; }
+button, .btn { padding: 6px 14px; cursor: pointer; }
+label { display: block; margin: 10px 0 4px; font-weight: bold; }
+.hint { color: #666; font-size: 13px; }
+.flash { background: #d1ecf1; border: 1px solid #bee5eb; padding: 10px; border-radius: 4px; margin-bottom: 12px; }
+pre.log { background: #111; color: #ddd; padding: 12px; border-radius: 4px; overflow-x: auto; max-height: 600px; overflow-y: auto; font-size: 13px; }
+.field { margin-bottom: 12px; }
+.inline { display: inline-block; margin-right: 8px; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="/">仪表盘</a>
+  <a href="/plugins">插件管理</a>
+  <a href="/models">模型管理</a>
+  <a href="/logs">日志查看</a>
+</nav>
+<div class="wrap">
+  {% with msgs = get_flashed_messages() %}
+    {% if msgs %}{% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}{% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

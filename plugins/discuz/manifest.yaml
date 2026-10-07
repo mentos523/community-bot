@@ -1,0 +1,32 @@
+name: discuz
+version: 1.0.0
+description: Discuz! 论坛适配器
+author: robbin
+platform_type: forum  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  url:
+    type: string
+    required: true
+    description: 论坛地址，如 https://example.com
+  username:
+    type: string
+    required: false
+    description: 机器人账号用户名（用于登录）
+  password:
+    type: string
+    required: false
+    secret: true
+    description: 机器人账号密码
+    env_var: DISCUZ_PASSWORD
+  fid:
+    type: string
+    required: false
+    default: ""
+    description: 版块 ID（留空则全站，多个用逗号分隔）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

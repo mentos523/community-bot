@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}配置 {{ name }} - 社区机器人{% endblock %}
+{% block content %}
+<h2>插件配置：{{ name }}</h2>
+<p class="hint">{{ manifest.description }}（v{{ manifest.version }}）
+  状态：{% if enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge gray">禁用</span>{% endif %}
+</p>
+
+{% if errors %}
+<div class="card">
+  <b>配置缺失：</b>
+  <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="card">
+<form method="post">
+  {% for f in fields %}
+  <div class="field">
+    <label>{{ f.key }}{% if f.required %} <span style="color:red">*</span>{% endif %}</label>
+    {% if f.type == "boolean" %}
+      <input type="checkbox" name="cfg_{{ f.key }}" value="1" {% if f.value %}checked{% endif %}>
+    {% elif f.secret %}
+      <input type="password" name="cfg_{{ f.key }}" placeholder="{% if f.masked %}已设置（{{ f.masked }}），留空保留{% else %}未设置{% endif %}">
+    {% elif f.type == "integer" %}
+      <input type="number" name="cfg_{{ f.key }}" value="{{ f.value }}">
+    {% else %}
+      <input type="text" name="cfg_{{ f.key }}" value="{{ f.value }}">
+    {% endif %}
+    <div class="hint">{{ f.description }}
+      {% if f.env_var %}[环境变量 {{ f.env_var }}{% if f.source == "env" %}：当前生效中{% endif %}]{% endif %}
+      {% if f.source == "env" %}<span class="badge warn">来自环境变量</span>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  <button type="submit">保存</button>
+  <a href="/plugins"><button type="button">返回</button></a>
+</form>
+</div>
+<p class="hint">密钥类建议走环境变量，不要写进配置文件。密码框留空表示保留原值。</p>
+{% endblock %}

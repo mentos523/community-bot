@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}模型管理 - 社区机器人{% endblock %}
+{% block content %}
+<h2>模型管理</h2>
+
+<div class="card">
+  <h3>已配置模型（默认：{{ default_model or "未设置" }}）</h3>
+  <table>
+    <tr><th>名称</th><th>类型</th><th>地址</th><th>操作</th></tr>
+    {% for m in models %}
+    <tr>
+      <td><b>{{ m.name }}</b>{% if m.name == default_model %} <span class="badge ok">默认</span>{% endif %}</td>
+      <td>{{ m.type }}</td>
+      <td class="hint">{{ m.endpoint or "—" }}</td>
+      <td>
+        <form class="inline" method="post" action="/models">
+          <input type="hidden" name="action" value="set_default">
+          <input type="hidden" name="name" value="{{ m.name }}">
+          <button type="submit">设为默认</button>
+        </form>
+        <button type="button" onclick="testModel('{{ m.name }}')">测试</button>
+        <form class="inline" method="post" action="/models" onsubmit="return confirm('删除 {{ m.name }}？')">
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="name" value="{{ m.name }}">
+          <button type="submit">删除</button>
+        </form>
+        <span id="test-{{ m.name }}" class="hint"></span>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3>扫描本地模型</h3>
+  <form method="post" action="/models">
+    <input type="hidden" name="action" value="scan">
+    <button type="submit">扫描 Ollama</button>
+  </form>
+  {% if scanned is not none %}
+    {% if scanned %}
+    <table style="margin-top:10px">
+      <tr><th>模型</th><th>操作</th></tr>
+      {% for s in scanned %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td>
+          {% if s.added %}<span class="badge gray">已添加</span>
+          {% else %}
+          <form class="inline" method="post" action="/models">
+            <input type="hidden" name="action" value="add">
+            <input type="hidden" name="name" value="{{ s.name }}">
+            <button type="submit">添加</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>手动添加模型</h3>
+  <form method="post" action="/models">
+    <input type="hidden" name="action" value="add_custom">
+    <div class="field"><label>名称</label><input type="text" name="name" required></div>
+    <div class="field"><label>类型</label>
+      <select name="type">
+        <option value="local">local（Ollama）</option>
+        <option value="remote">remote（OpenAI 兼容）</option>
+        <option value="openai">openai</option>
+        <option value="gemini">gemini</option>
+        <option value="anthropic">anthropic</option>
+      </select>
+    </div>
+    <div class="field"><label>地址（本地/远端必填）</label><input type="text" name="endpoint" placeholder="http://localhost:11434"></div>
+    <button type="submit">添加</button>
+  </form>
+  <p class="hint">商业模型 API Key 请走环境变量：OPENAI_API_KEY / GEMINI_API_KEY / ANTHROPIC_API_KEY</p>
+</div>
+
+<script>
+function testModel(name) {
+  var el = document.getElementById('test-' + name);
+  el.textContent = '测试中…';
+  var fd = new FormData();
+  fd.append('name', name);
+  fetch('/models/test', {method: 'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      el.textContent = j.ok ? ('OK ' + j.latency + 's: ' + j.text) : ('失败: ' + j.error);
+    })
+    .catch(function(e){ el.textContent = '请求失败: ' + e; });
+}
+</script>
+{% endblock %}

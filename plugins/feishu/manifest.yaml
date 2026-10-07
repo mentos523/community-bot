@@ -1,0 +1,28 @@
+name: feishu
+version: 1.0.0
+description: 飞书自建应用机器人适配器
+author: robbin
+platform_type: chat
+
+config_schema:
+  app_id:
+    type: string
+    required: true
+    description: 飞书开放平台应用 App ID
+    env_var: FEISHU_APP_ID
+  app_secret:
+    type: string
+    required: true
+    secret: true
+    description: 飞书开放平台应用 App Secret
+    env_var: FEISHU_APP_SECRET
+  chat_ids:
+    type: string
+    required: true
+    description: 监听的群聊 chat_id，多个用英文逗号分隔（需把机器人拉进群，并开通 im:message 权限）
+    env_var: FEISHU_CHAT_IDS
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply
