@@ -1,0 +1,38 @@
+name: flarum
+version: 1.0.0
+description: Flarum 论坛适配器
+author: robbin
+platform_type: forum  # forum | chat
+
+# 配置项定义（Web 界面据此自动生成配置表单）
+config_schema:
+  url:
+    type: string
+    required: true
+    description: 论坛地址，如 https://example.com
+  token:
+    type: string
+    required: true
+    secret: true
+    description: API Token
+    env_var: FLARUM_TOKEN
+  username:
+    type: string
+    required: false
+    description: 机器人账号用户名（用于全新登录换 token）
+  password:
+    type: string
+    required: false
+    secret: true
+    description: 机器人账号密码（用于 token 失效自动重登）
+    env_var: FLARUM_PASSWORD
+  tag_filter:
+    type: string
+    required: false
+    default: ""
+    description: 标签过滤，如 communicate（留空则全板块）
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply

@@ -1,0 +1,27 @@
+name: telegram
+version: 1.0.0
+description: Telegram Bot 适配器
+author: robbin
+platform_type: chat
+
+config_schema:
+  bot_token:
+    type: string
+    required: true
+    secret: true
+    description: BotFather 申请的 Bot Token
+    env_var: TELEGRAM_BOT_TOKEN
+  chat_id:
+    type: string
+    required: false
+    description: 默认目标群组/频道 ID（留空则监听所有）
+  mode:
+    type: string
+    required: false
+    default: polling
+    description: polling 或 webhook
+
+capabilities:
+  - fetch_updates
+  - fetch_detail
+  - reply
