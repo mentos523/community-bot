@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 - 社区机器人</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; background: #f4f4f4; color: #222; }
+.wrap { max-width: 420px; margin: 80px auto; padding: 0 16px; }
+.card { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 24px; }
+input[type=password] { padding: 8px; width: 100%; box-sizing: border-box; margin: 8px 0; }
+button { padding: 8px 20px; cursor: pointer; }
+.flash { background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px; margin-bottom: 12px; }
+.hint { color: #666; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h2>社区机器人 · 管理登录</h2>
+    {% with msgs = get_flashed_messages() %}
+      {% if msgs %}{% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}{% endif %}
+    {% endwith %}
+    {% if pw_set %}
+    <form method="post">
+      <input type="password" name="password" placeholder="管理密码" autofocus>
+      <button type="submit">登录</button>
+    </form>
+    <p class="hint">密码来自环境变量 WEB_PASSWORD。</p>
+    {% else %}
+    <p class="hint">未设置 <b>WEB_PASSWORD</b> 环境变量，Web 管理已锁定。<br>
+    请设置后重启：<br><code>export WEB_PASSWORD="你的密码"</code></p>
+    {% endif %}
+  </div>
+</div>
+</body>
+</html>

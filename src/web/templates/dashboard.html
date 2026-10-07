@@ -13,7 +13,7 @@
       <td>{{ c.name }}</td>
       <td>{{ c.plugin }}</td>
       <td>
-        {% if c.enabled and enabled_map.get(c.plugin, True) %}
+        {% if c.enabled|default(true) %}
           <span class="badge ok">在线</span>
         {% else %}
           <span class="badge gray">停用</span>

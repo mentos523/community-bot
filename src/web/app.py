@@ -6,22 +6,71 @@
 功能：仪表盘 / 插件管理 / 插件配置 / 模型管理 / 日志查看
 配置与 config/config.yaml 同源，修改直接写回。
 """
+import hashlib
+import hmac
 import json
 import os
 import sys
 import time
 import urllib.request
 import urllib.error
+from functools import wraps
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify  # noqa: E402
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session  # noqa: E402
 
 from src.web import config_store as cs  # noqa: E402
 from src.core import plugin_loader  # noqa: E402
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("WEB_SECRET_KEY", "dev-secret-change-me")
+
+# ---- 会话密钥（S1/N8）：优先环境变量，否则每次启动随机生成 ----
+_sk = os.environ.get("WEB_SECRET_KEY", "")
+if _sk:
+    app.secret_key = _sk
+else:
+    app.secret_key = os.urandom(32)
+    print("警告: 未设置 WEB_SECRET_KEY，已生成随机密钥（重启后登录态失效）")
+
+
+# ---------- 登录鉴权（S1） ----------
+
+def _password_ok(pw: str) -> bool:
+    """密码与环境变量 WEB_PASSWORD 做 SHA256 哈希比对。"""
+    expected = os.environ.get("WEB_PASSWORD", "")
+    if not expected:
+        return False  # 未设置密码时一律拒绝登录
+    return hmac.compare_digest(
+        hashlib.sha256(pw.encode("utf-8")).hexdigest(),
+        hashlib.sha256(expected.encode("utf-8")).hexdigest(),
+    )
+
+
+@app.before_request
+def _require_login():
+    if request.endpoint in ("login", "static"):
+        return
+    if not session.get("authed"):
+        return redirect(url_for("login", next=request.path))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    pw_set = bool(os.environ.get("WEB_PASSWORD", ""))
+    if request.method == "POST" and pw_set:
+        if _password_ok(request.form.get("password", "")):
+            session["authed"] = True
+            nxt = request.args.get("next") or url_for("dashboard")
+            return redirect(nxt)
+        flash("密码错误")
+    return render_template("login.html", pw_set=pw_set)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 # ---------- 小工具 ----------
@@ -46,9 +95,8 @@ def http_json(url, payload=None, headers=None, timeout=30, method=None):
 
 
 def mask_secret(v: str) -> str:
-    if not v:
-        return ""
-    return v[:2] + "*" * 6 if len(v) > 4 else "******"
+    """密钥一律全掩码，不泄露任何原文字符（N9）。"""
+    return "********" if v else ""
 
 
 # ---------- 仪表盘 ----------
@@ -57,13 +105,8 @@ def mask_secret(v: str) -> str:
 def dashboard():
     cfg = cs.load_config()
     communities = cfg.get("communities") or []
-    plugins_cfg = cfg.get("plugins") or {}
     models = cfg.get("models") or []
     default_model = cfg.get("default_model", "")
-
-    # 插件启用状态速查
-    enabled_map = {name: bool((plugins_cfg.get(name) or {}).get("enabled", True))
-                   for name in plugins_cfg}
 
     # Ollama 连通性（取第一个 local 模型 endpoint）
     ollama_ok, ollama_models = False, []
@@ -76,81 +119,105 @@ def dashboard():
 
     return render_template("dashboard.html",
                            communities=communities,
-                           enabled_map=enabled_map,
                            models=models,
                            default_model=default_model,
                            ollama_ok=ollama_ok,
                            ollama_models=ollama_models)
 
 
-# ---------- 插件管理 ----------
+# ---------- 社区管理（S2：读写 communities 列表段，与守护进程同源） ----------
+
+def _merged_community_config(comm: dict, manifest: dict) -> dict:
+    """合并社区配置：manifest 默认 < 环境变量 < 配置文件（与 main.py 一致）。"""
+    merged = dict(comm)
+    for key, rule in (manifest.get("config_schema") or {}).items():
+        if merged.get(key) not in (None, ""):
+            continue
+        ev = os.environ.get(rule.get("env_var", ""), "")
+        if ev:
+            merged[key] = ev
+        elif "default" in rule:
+            merged[key] = rule["default"]
+    return merged
+
 
 @app.route("/plugins")
 def plugins():
     cfg = cs.load_config()
-    plugins_cfg = cfg.get("plugins") or {}
+    manifests = {m["_name"]: m for m in plugin_loader.discover_plugins()}
     items = []
-    for m in plugin_loader.discover_plugins():
-        name = m["_name"]
-        pcfg = plugins_cfg.get(name) or {}
-        schema = m.get("config_schema") or {}
-        # 必填项缺失数
-        missing = plugin_loader.validate_plugin_config(m, pcfg)
+    for comm in cfg.get("communities") or []:
+        name = comm.get("name", "")
+        plugin = comm.get("plugin", "")
+        m = manifests.get(plugin, {})
+        merged = _merged_community_config(comm, m)
         items.append({
             "name": name,
+            "plugin": plugin,
             "description": m.get("description", ""),
             "version": m.get("version", ""),
             "platform_type": m.get("platform_type", ""),
-            "enabled": bool(pcfg.get("enabled", False)),
-            "missing": missing,
+            "model": comm.get("model") or cfg.get("default_model", ""),
+            "enabled": bool(comm.get("enabled", True)),
+            "missing": plugin_loader.validate_plugin_config(m, merged),
+            "plugin_missing": plugin not in manifests,
         })
-    return render_template("plugins.html", items=items)
+    used = {c.get("plugin") for c in cfg.get("communities") or []}
+    unused = [m for m in plugin_loader.discover_plugins() if m["_name"] not in used]
+    return render_template("plugins.html", items=items, unused=unused)
 
 
 @app.route("/plugins/<name>/toggle", methods=["POST"])
 def plugin_toggle(name):
     cfg = cs.load_config()
-    cfg.setdefault("plugins", {}).setdefault(name, {})["enabled"] = (request.form.get("enabled") == "1")
-    cs.save_config(cfg)
-    flash(f"插件 {name} 已{'启用' if request.form.get('enabled') == '1' else '禁用'}")
+    enabled = (request.form.get("enabled") == "1")
+    if cs.toggle_community(cfg, name, enabled):
+        cs.save_config(cfg)
+        flash(f"社区 {name} 已{'启用' if enabled else '禁用'}")
+    else:
+        flash(f"未找到社区 {name}")
     return redirect(url_for("plugins"))
 
 
 @app.route("/plugins/<name>", methods=["GET", "POST"])
 def plugin_config(name):
-    manifests = {m["_name"]: m for m in plugin_loader.discover_plugins()}
-    m = manifests.get(name)
-    if not m:
-        flash(f"未找到插件 {name}")
+    cfg = cs.load_config()
+    comm = cs.find_community(cfg, name)
+    if not comm:
+        flash(f"未找到社区 {name}")
         return redirect(url_for("plugins"))
+    manifests = {m["_name"]: m for m in plugin_loader.discover_plugins()}
+    m = manifests.get(comm.get("plugin", ""), {})
     schema = m.get("config_schema") or {}
 
     if request.method == "POST":
-        cfg = cs.load_config()
-        pcfg = cfg.setdefault("plugins", {}).setdefault(name, {})
-        pcfg["enabled"] = pcfg.get("enabled", False)
+        values = {}
         for key, rule in schema.items():
             raw = request.form.get(f"cfg_{key}", "")
             if rule.get("type") == "boolean":
-                pcfg[key] = (raw == "1")
+                values[key] = (raw == "1")
             elif rule.get("secret") and not raw.strip():
-                pass  # 密码框留空 = 保留原值
+                continue  # 密码框留空 = 保留原值
             else:
-                pcfg[key] = raw.strip()
+                values[key] = raw.strip()
+        # 社区级字段
+        model = request.form.get("comm_model", "").strip()
+        values["model"] = model  # 空表示用 default_model
+        cs.set_community_values(cfg, name, values)
         cs.save_config(cfg)
-        flash(f"插件 {name} 配置已保存")
+        flash(f"社区 {name} 配置已保存")
         return redirect(url_for("plugin_config", name=name))
 
     cfg = cs.load_config()
-    pcfg = cs.get_plugin_config(cfg, name)
+    comm = cs.find_community(cfg, name)
     fields = []
     for key, rule in schema.items():
-        cur, source = cs.effective_value(pcfg.get(key), rule.get("env_var", ""))
+        cur, source = cs.effective_value(comm.get(key), rule.get("env_var", ""))
         ftype = rule.get("type", "string")
         if rule.get("secret"):
             shown = ""  # 密码框不回显原值
         elif ftype == "boolean":
-            shown = bool(pcfg.get(key, rule.get("default", False)))
+            shown = bool(comm.get(key, rule.get("default", False)))
         else:
             shown = cur if source == "config" else (rule.get("default", "") if cur == "" else cur)
         fields.append({
@@ -164,10 +231,13 @@ def plugin_config(name):
             "value": shown,
             "masked": mask_secret(cur) if rule.get("secret") and cur else "",
         })
-    errors = plugin_loader.validate_plugin_config(m, pcfg)
+    errors = plugin_loader.validate_plugin_config(m, _merged_community_config(comm, m))
     return render_template("plugin_config.html", name=name, manifest=m,
                            fields=fields, errors=errors,
-                           enabled=bool(pcfg.get("enabled", False)))
+                           enabled=bool(comm.get("enabled", True)),
+                           plugin=comm.get("plugin", ""),
+                           comm_model=comm.get("model", ""),
+                           default_model=cfg.get("default_model", ""))
 
 
 # ---------- 模型管理 ----------
@@ -212,6 +282,10 @@ def models():
             name = request.form.get("name", "").strip()
             mtype = request.form.get("type", "remote")
             endpoint = request.form.get("endpoint", "").strip()
+            # M7：endpoint 只允许 http/https 协议，防 SSRF 到 file/gopher 等
+            if endpoint and not endpoint.startswith(("http://", "https://")):
+                flash("endpoint 必须以 http:// 或 https:// 开头")
+                return redirect(url_for("models"))
             if name and not any(m.get("name") == name for m in models):
                 entry = {"name": name, "type": mtype}
                 if endpoint:
@@ -326,8 +400,10 @@ def logs():
 def main():
     cfg = cs.load_config()
     web = cfg.get("web") or {}
-    host = web.get("host", "0.0.0.0")
+    host = web.get("host", "127.0.0.1")  # S1：默认只监听本机
     port = int(web.get("port", 52323))
+    if not os.environ.get("WEB_PASSWORD"):
+        print("警告: 未设置 WEB_PASSWORD 环境变量，Web 登录已锁定（所有页面需登录）")
     print(f"Web 管理端启动: http://{host}:{port}")
     app.run(host=host, port=port)
 

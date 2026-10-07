@@ -46,17 +46,17 @@ config_schema:
 
 ### 2. 配置文件
 
-`config/config.yaml` 中按插件名配置：
+`config/config.yaml` 的 `communities` 列表中，每个社区条目直接写插件配置项：
 
 ```yaml
-plugins:
-  flarum:
+communities:
+  - name: "学习交流"      # 社区名称（Web 界面按此管理）
+    plugin: flarum       # 插件名
     enabled: true
+    model: "qwen2.5:7b"  # 本社区用的模型（留空用 default_model）
     url: "https://example.com"
+    tag_filter: "communicate"
     # token 从环境变量 FLARUM_TOKEN 读取，此处不写
-  telegram:
-    enabled: false
-    # bot_token 从环境变量 TELEGRAM_BOT_TOKEN 读取
 ```
 
 ### 3. 环境变量
@@ -79,7 +79,7 @@ export OPENAI_API_KEY="xxx"
 ## 启用/禁用
 
 - Web 界面：插件列表页一键启用/禁用
-- 配置文件：`plugins.<名>.enabled: true/false`
+- 配置文件：`communities` 条目中 `enabled: true/false`
 - 禁用的插件不被加载，不参与轮询
 
 ## 开发新插件

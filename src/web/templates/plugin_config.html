@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}配置 {{ name }} - 社区机器人{% endblock %}
 {% block content %}
-<h2>插件配置：{{ name }}</h2>
-<p class="hint">{{ manifest.description }}（v{{ manifest.version }}）
+<h2>社区配置：{{ name }}</h2>
+<p class="hint">插件：{{ plugin }}　{{ manifest.description }}（v{{ manifest.version }}）
   状态：{% if enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge gray">禁用</span>{% endif %}
 </p>
 
@@ -15,6 +15,11 @@
 
 <div class="card">
 <form method="post">
+  <div class="field">
+    <label>本社区使用的模型</label>
+    <input type="text" name="comm_model" value="{{ comm_model }}" placeholder="留空则用默认模型（{{ default_model }}）">
+    <div class="hint">在"模型管理"页添加模型后，填模型名称即可切换，热重载生效。</div>
+  </div>
   {% for f in fields %}
   <div class="field">
     <label>{{ f.key }}{% if f.required %} <span style="color:red">*</span>{% endif %}</label>

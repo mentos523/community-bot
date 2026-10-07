@@ -1,4 +1,7 @@
-"""配置读写：与 config/config.yaml 同源，Web 修改直接写回此文件。"""
+"""配置读写：与 config/config.yaml 同源，Web 修改直接写回此文件。
+
+S2：Web 只读写 communities 列表段，与守护进程（main.py）同源。
+"""
 import os
 import yaml
 
@@ -16,15 +19,43 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    """写回 config/config.yaml。"""
+    """写回 config/config.yaml。N4：先写临时文件再原子替换，避免读到一半的 YAML。"""
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+    os.replace(tmp, CONFIG_PATH)
 
 
-def get_plugin_config(cfg: dict, name: str) -> dict:
-    """取某插件的配置段（含 enabled）。"""
-    return (cfg.get("plugins") or {}).get(name) or {}
+def get_communities(cfg: dict) -> list:
+    """取 communities 列表。"""
+    return cfg.get("communities") or []
+
+
+def find_community(cfg: dict, name: str) -> dict | None:
+    """按名称找社区条目（返回引用，可直接修改）。"""
+    for c in get_communities(cfg):
+        if c.get("name") == name:
+            return c
+    return None
+
+
+def toggle_community(cfg: dict, name: str, enabled: bool) -> bool:
+    """启用/禁用某社区。返回是否找到。"""
+    comm = find_community(cfg, name)
+    if comm is None:
+        return False
+    comm["enabled"] = enabled
+    return True
+
+
+def set_community_values(cfg: dict, name: str, values: dict) -> bool:
+    """更新某社区的配置键。返回是否找到。"""
+    comm = find_community(cfg, name)
+    if comm is None:
+        return False
+    comm.update(values)
+    return True
 
 
 def effective_value(cfg_value, env_var: str):

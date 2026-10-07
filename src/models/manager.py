@@ -14,7 +14,7 @@ DEFAULT_ENV_KEY = {
     "anthropic": "ANTHROPIC_API_KEY",
 }
 
-REQUEST_TIMEOUT = 300  # 模型生成超时（秒）
+REQUEST_TIMEOUT = 120  # M2：模型生成超时（秒）。单线程调度，超时太长会卡住所有社区
 
 
 class ModelError(Exception):
@@ -43,6 +43,10 @@ class ModelManager:
 
     def list_models(self) -> list[str]:
         return list(self.models)
+
+    def get_options(self, model_name: str) -> dict:
+        """N10：取某模型的 options（供调度器调用，不直取内部属性）。"""
+        return (self.models.get(model_name) or {}).get("options") or {}
 
     def detect_local_models(self, endpoint: str = "http://localhost:11434") -> list[str]:
         """扫描本地 Ollama 已下载模型（供 Web 界面调用）。"""

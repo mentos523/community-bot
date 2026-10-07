@@ -1,7 +1,7 @@
 """回复完整性校验：空回复、思维链泄露、截断。"""
 import re
 
-# 思维链泄露特征（在回复前 300 字出现即判失败）
+# 思维链泄露特征（N2：全文检查，不只看前 300 字）
 LEAK_PATTERNS = [
     r"<think>", r"</think>",
     r"we need to", r"as an ai", r"as a language model",
@@ -10,8 +10,8 @@ LEAK_PATTERNS = [
     r"首先让我分析一下",
 ]
 
-# 正常结尾标点（结尾是这些才算完整断句）
-END_PUNCT = ("。", "！", "？", "…", ".", "!", "?", "」", "』", ")", "）", '"', '"')
+# 正常结尾标点（结尾是这些才算完整断句；N1：只保留右引号，去掉左引号）
+END_PUNCT = ("。", "！", "？", "…", ".", "!", "?", "」", "』", ")", "）", '"')
 
 
 def validate(text: str, max_length: int = 0) -> tuple[bool, str]:
@@ -21,7 +21,7 @@ def validate(text: str, max_length: int = 0) -> tuple[bool, str]:
     t = text.strip()
     if len(t) < 10:
         return False, f"过短({len(t)}字)"
-    head = t[:300]
+    head = t
     for pat in LEAK_PATTERNS:
         if re.search(pat, head, re.IGNORECASE):
             return False, f"思维链泄露({pat})"
