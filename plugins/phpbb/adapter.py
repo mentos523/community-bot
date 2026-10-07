@@ -19,7 +19,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import Message, PlatformAdapter
+from src.core.base import Message, PlatformAdapter, AuthError
 
 TIMEOUT = 20
 
@@ -75,6 +75,8 @@ class Adapter(PlatformAdapter):
                 body = resp.read()
                 return resp.status, (json.loads(body) if body else None)
         except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("phpBB 认证失效（401/403）")
             return e.code, None
         except Exception:
             return 0, None
@@ -123,6 +125,13 @@ class Adapter(PlatformAdapter):
 
     def fetch_detail(self, conversation_id):
         """拉取主题的全部帖子"""
+        # N1 修复：先拿主题标题
+        title = ""
+        tcode, tdata = self._request("GET", "/topics/{}".format(conversation_id))
+        if tcode == 200 and isinstance(tdata, dict):
+            t = tdata.get("topic", tdata)
+            if isinstance(t, dict):
+                title = t.get("topic_title", t.get("title", ""))
         code, data = self._request("GET", "/topics/{}/posts".format(conversation_id))
         if code != 200 or not data:
             return []
@@ -136,6 +145,7 @@ class Adapter(PlatformAdapter):
                     id=str(p.get("post_id", p.get("id", ""))),
                     platform="phpbb",
                     conversation_id=str(conversation_id),
+                    conversation_title=title,
                     author_id=str(p.get("poster_id", p.get("user_id", ""))),
                     author_name=p.get("username", p.get("poster_name", "")),
                     content=content,
@@ -143,6 +153,8 @@ class Adapter(PlatformAdapter):
                     raw={},
                 )
             )
+        # N4 修复：按 post_id 排序
+        out.sort(key=lambda m: int(m.id) if m.id.isdigit() else 0)
         return out
 
     def reply(self, conversation_id, content):
@@ -150,4 +162,5 @@ class Adapter(PlatformAdapter):
         code, data = self._request(
             "POST", "/topics/{}/posts".format(conversation_id), {"content": content}
         )
-        return code in (200, 201) and data is not None
+        # M11 修复：只看状态码，空 body 也算成功，避免重复发帖
+        return code in (200, 201)

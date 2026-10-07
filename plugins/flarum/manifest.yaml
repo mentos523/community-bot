@@ -20,6 +20,7 @@ config_schema:
     type: string
     required: false
     description: 机器人账号用户名（用于全新登录换 token）
+    env_var: FLARUM_USERNAME
   password:
     type: string
     required: false

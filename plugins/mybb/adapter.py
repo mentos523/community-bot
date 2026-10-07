@@ -14,11 +14,24 @@ import json
 import urllib.request
 import urllib.error
 import urllib.parse
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
 
 REQUEST_TIMEOUT = 20
+
+
+def _to_iso(ts):
+    """unix 时间戳（秒）/ ISO 字符串 -> ISO 8601"""
+    if not ts:
+        return ""
+    if isinstance(ts, (int, float)) or str(ts).isdigit():
+        try:
+            return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+        except Exception:
+            return str(ts)
+    return str(ts)
 
 
 class Adapter(PlatformAdapter):
@@ -29,12 +42,14 @@ class Adapter(PlatformAdapter):
         self.fid = config.get("fid", "")
 
     def _headers(self):
-        return {
-            "X-API-Key": self.api_key,
+        headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "CommunityBot/1.0",
         }
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        return headers
 
     def _get(self, path: str, params: dict = None):
         try:
@@ -44,6 +59,10 @@ class Adapter(PlatformAdapter):
             req = urllib.request.Request(url, headers=self._headers())
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
                 return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("MyBB 认证失效（401/403）")
+            return None
         except Exception:
             return None
 
@@ -56,6 +75,10 @@ class Adapter(PlatformAdapter):
             )
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
                 return r.status in (200, 201)
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("MyBB 认证失效（401/403）")
+            return False
         except Exception:
             return False
 
@@ -84,13 +107,27 @@ class Adapter(PlatformAdapter):
                 author_id=str(t.get("uid", t.get("author_id", ""))),
                 author_name=t.get("username", t.get("author", "")),
                 content=t.get("subject", t.get("title", "")),
-                created_at=str(t.get("dateline", t.get("created_at", ""))),
+                # M7 修复：用最后回复时间做水位，转 ISO
+                created_at=_to_iso(
+                    t.get("lastpost", t.get("last_post_time",
+                           t.get("dateline", t.get("created_at", ""))))
+                ),
                 raw=t,
             ))
         return msgs
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:
         """拉取主题下的帖子"""
+        # N1 修复：先拿主题标题
+        title = ""
+        tdata = self._get(f"/api/threads/{conversation_id}")
+        if isinstance(tdata, dict):
+            t = tdata
+            for k in ("thread", "data"):
+                if isinstance(tdata.get(k), dict):
+                    t = tdata[k]
+                    break
+            title = t.get("subject", t.get("title", ""))
         data = self._get(f"/api/threads/{conversation_id}/posts")
         msgs = []
         for p in self._as_list(data):
@@ -98,10 +135,11 @@ class Adapter(PlatformAdapter):
                 id=str(p.get("pid", p.get("id", ""))),
                 platform="mybb",
                 conversation_id=str(conversation_id),
+                conversation_title=title,
                 author_id=str(p.get("uid", p.get("author_id", ""))),
                 author_name=p.get("username", p.get("author", "")),
                 content=p.get("message", p.get("content", "")),
-                created_at=str(p.get("dateline", p.get("created_at", ""))),
+                created_at=_to_iso(p.get("dateline", p.get("created_at", ""))),
                 raw=p,
             ))
         return msgs

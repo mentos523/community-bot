@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import Message, PlatformAdapter
+from src.core.base import Message, PlatformAdapter, AuthError
 
 TIMEOUT = 20
 
@@ -46,8 +46,8 @@ class Adapter(PlatformAdapter):
         self._password = _conf(config, "password", "FLARUM_PASSWORD")
         self._tag = _conf(config, "tag_filter")
 
-    def _fresh_login(self):
-        """401 时用账号密码全新登录换 token"""
+    def refresh_auth(self) -> bool:
+        """N11 修复：401 时调度器调用此方法，用账号密码全新登录换 token"""
         if not (self.base and self._username and self._password):
             return False
         try:
@@ -69,27 +69,26 @@ class Adapter(PlatformAdapter):
         return False
 
     def _request(self, method, path, payload=None):
-        for attempt in range(2):
-            try:
-                data = json.dumps(payload).encode() if payload is not None else None
-                headers = {"Accept": "application/vnd.api+json"}
-                if self._token:
-                    headers["Authorization"] = "Token {}".format(self._token)
-                if data:
-                    headers["Content-Type"] = "application/json"
-                req = urllib.request.Request(
-                    self.base + path, data=data, headers=headers, method=method
-                )
-                with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                    body = resp.read()
-                    return resp.status, (json.loads(body) if body else None)
-            except urllib.error.HTTPError as e:
-                if e.code in (401, 403) and attempt == 0 and self._fresh_login():
-                    continue
-                return e.code, None
-            except Exception:
-                return 0, None
-        return 0, None
+        try:
+            data = json.dumps(payload).encode() if payload is not None else None
+            headers = {"Accept": "application/vnd.api+json"}
+            if self._token:
+                headers["Authorization"] = "Token {}".format(self._token)
+            if data:
+                headers["Content-Type"] = "application/json"
+            req = urllib.request.Request(
+                self.base + path, data=data, headers=headers, method=method
+            )
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                body = resp.read()
+                return resp.status, (json.loads(body) if body else None)
+        except urllib.error.HTTPError as e:
+            # N11：401/403 抛 AuthError，由调度器统一调 refresh_auth() 重登
+            if e.code in (401, 403):
+                raise AuthError("Flarum token 失效（401/403）")
+            return e.code, None
+        except Exception:
+            return 0, None
 
     def fetch_updates(self):
         """轻量拉取讨论列表（不进详情，不刷浏览量）"""

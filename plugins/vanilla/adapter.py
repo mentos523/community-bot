@@ -13,11 +13,26 @@ import json
 import urllib.request
 import urllib.error
 import urllib.parse
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import PlatformAdapter, Message
+from src.core.base import PlatformAdapter, Message, AuthError
 
 REQUEST_TIMEOUT = 20
+
+
+def _to_iso(s):
+    """Vanilla 日期 -> ISO 8601。支持 ISO 本身和 'YYYY-MM-DD HH:MM:SS'"""
+    if not s:
+        return ""
+    s = str(s).strip()
+    if "T" in s:
+        return s  # 已经是 ISO
+    try:
+        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except Exception:
+        return s
 
 
 class Adapter(PlatformAdapter):
@@ -28,12 +43,14 @@ class Adapter(PlatformAdapter):
         self.category_id = config.get("category_id", "")
 
     def _headers(self):
-        return {
-            "Authorization": f"Bearer {self.api_token}",
+        headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "CommunityBot/1.0",
         }
+        if self.api_token:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+        return headers
 
     def _get(self, path: str, params: dict = None):
         try:
@@ -43,6 +60,10 @@ class Adapter(PlatformAdapter):
             req = urllib.request.Request(url, headers=self._headers())
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
                 return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("Vanilla 认证失效（401/403）")
+            return None
         except Exception:
             return None
 
@@ -76,13 +97,19 @@ class Adapter(PlatformAdapter):
                 author_id=str(d.get("insertUserID", "")),
                 author_name=d.get("insertUser", {}).get("name", "") if isinstance(d.get("insertUser"), dict) else "",
                 content=d.get("name", ""),
-                created_at=str(d.get("dateInserted", "")),
+                # S4 修复：用最后评论时间（dateLastComment）做水位，转 ISO
+                created_at=_to_iso(d.get("dateLastComment") or d.get("dateInserted", "")),
                 raw=d,
             ))
         return msgs
 
     def fetch_detail(self, conversation_id: str) -> list[Message]:
         """拉取讨论下的评论"""
+        # N1 修复：先拿讨论标题
+        title = ""
+        ddata = self._get(f"/api/v2/discussions/{conversation_id}")
+        if isinstance(ddata, dict):
+            title = ddata.get("name", "")
         data = self._get("/api/v2/comments", {
             "discussionID": conversation_id,
             "sort": "dateInserted",
@@ -97,10 +124,11 @@ class Adapter(PlatformAdapter):
                 id=str(c.get("commentID", "")),
                 platform="vanilla",
                 conversation_id=str(conversation_id),
+                conversation_title=title,
                 author_id=str(c.get("insertUserID", "")),
                 author_name=user.get("name", "") if isinstance(user, dict) else "",
                 content=c.get("body", ""),
-                created_at=str(c.get("dateInserted", "")),
+                created_at=_to_iso(c.get("dateInserted", "")),
                 raw=c,
             ))
         return msgs

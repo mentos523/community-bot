@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import Message, PlatformAdapter
+from src.core.base import Message, PlatformAdapter, AuthError
 
 TIMEOUT = 20
 
@@ -63,6 +63,9 @@ class Adapter(PlatformAdapter):
                 body = resp.read()
                 return resp.status, (json.loads(body) if body else None)
         except urllib.error.HTTPError as e:
+            # N11：401/403 抛 AuthError，由调度器统一处理
+            if e.code in (401, 403):
+                raise AuthError("Discourse 认证失效（401/403）")
             return e.code, None
         except Exception:
             return 0, None

@@ -16,7 +16,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-from src.core.base import Message, PlatformAdapter
+from src.core.base import Message, PlatformAdapter, AuthError
 
 TIMEOUT = 20
 
@@ -69,6 +69,8 @@ class Adapter(PlatformAdapter):
                 body = resp.read()
                 return resp.status, (json.loads(body) if body else None)
         except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("NodeBB 认证失效（401/403）")
             return e.code, None
         except Exception:
             return 0, None
@@ -128,4 +130,5 @@ class Adapter(PlatformAdapter):
         code, data = self._request(
             "POST", "/api/v3/topics/{}".format(conversation_id), payload
         )
-        return code in (200, 201) and data is not None
+        # M11 修复：只看状态码，空 body 也算成功，避免重复发帖
+        return code in (200, 201)
