@@ -88,7 +88,7 @@ prompts:
 rules:
   min_question_length: 5       # 问题最短字符数
   skip_keywords: ["测试", "test", "签到"]
-  always_reply_users: ["your_username"]  # 名单用户每次都回，不受门槛限制
+  always_reply_users: ["your_username"]  # 名单用户只豁免内容门槛（最短长度/跳过关键词），日上限与单讨论上限照样生效
   max_replies_per_discussion_per_day: 2
   max_replies_per_day: 20
   reply_style:
